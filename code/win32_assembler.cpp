@@ -86,20 +86,30 @@ oper
     return(result);
 }
 
+enum OpCode_Type
+{
+    OpCode_Type_Regular,
+    OpCode_Type_Extended
+};
+
 struct OpCode
 {
-    u8 op_code;
+    u8 opcode;
+    OpCode_Type type;
+    u8 opcode_extension;
     Operand_Type operand_type[2];
     b32 use_modrm;
 };
 
 OpCode
 opc
-(u8 op_code, Operand_Type op_type_0, Operand_Type op_type_1, b32 use_modrm)
+(u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, b32 use_modrm)
 {
     
     OpCode result = {};
-    result.op_code = op_code;
+    result.opcode = opcode;
+    result.type = opcode_type;
+    result.opcode_extension = opcode_extension;
     result.operand_type[0] = op_type_0;
     result.operand_type[1] = op_type_1;
     result.use_modrm = use_modrm;
@@ -114,6 +124,21 @@ struct OpCode_List
 
 global OpCode_List mov;
 global OpCode_List ret;
+
+void
+add_opcode
+(Buffer *buffer, OpCode_List *op_list, u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, b32 use_modrm)
+{
+    
+    OpCode *to_add = (OpCode *)buffer_allocate(buffer, sizeof(OpCode));
+    *to_add = opc(opcode, opcode_type, opcode_extension, op_type_0, op_type_1, use_modrm);
+    op_list->count++;
+    
+    if(op_list->start == 0)
+    {
+        op_list->start = to_add;
+    }
+}
 
 struct Instruction
 {
@@ -182,8 +207,12 @@ assemble
                 rex_byte |= Rex_Byte | Rex_R;
             }
         }
+        else if(opcode->type == OpCode_Type_Extended)
+        {
+            reg_opcode = opcode->opcode_extension;
+        }
         
-        // Doing registers only for now.
+        // TODO: Properly set mode.
         modrm = 0b11000000 | (reg_opcode << 3) | reg_mem;
         
     }
@@ -198,7 +227,7 @@ assemble
         buffer_append_u8(buffer, rex_byte);
     }
     
-    buffer_append_u8(buffer, opcode->op_code);
+    buffer_append_u8(buffer, opcode->opcode);
     
     if(modrm != 0)
     {
@@ -230,21 +259,6 @@ assemble
             }break;
         };
         
-    }
-}
-
-void
-add_opcode
-(Buffer *buffer, OpCode_List *op_list, u8 op_code, Operand_Type op_type_0, Operand_Type op_type_1, b32 use_modrm)
-{
-    
-    OpCode *to_add = (OpCode *)buffer_allocate(buffer, sizeof(OpCode));
-    *to_add = opc(op_code, op_type_0, op_type_1, use_modrm);
-    op_list->count++;
-    
-    if(op_list->start == 0)
-    {
-        op_list->start = to_add;
     }
 }
 
@@ -296,10 +310,10 @@ WinMainCRTStartup
     
     Buffer buffer_opcode_table = create_buffer(PAGE, PAGE_READWRITE);
     
-    add_opcode(&buffer_opcode_table, &mov, 0x89, Operand_Type_Register, Operand_Type_Register, true);
-    add_opcode(&buffer_opcode_table, &mov, 0xc7, Operand_Type_Register, Operand_Type_Immediate, true);
+    add_opcode(&buffer_opcode_table, &mov, 0x89, OpCode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, true);
+    add_opcode(&buffer_opcode_table, &mov, 0xc7, OpCode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, true);
     
-    add_opcode(&buffer_opcode_table, &ret, 0xc3, Operand_Type_None, Operand_Type_None, false);
+    add_opcode(&buffer_opcode_table, &ret, 0xc3, OpCode_Type_Regular, 0, Operand_Type_None, Operand_Type_None, false);
     
     {    
         
