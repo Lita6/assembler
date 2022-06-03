@@ -38,7 +38,8 @@ struct Operand
     Size size;
 };
 
-global Operand no_oprnd;
+global Operand no_operand;
+
 global Operand rax;
 global Operand rcx;
 global Operand rdx;
@@ -89,7 +90,8 @@ oper
 enum OpCode_Type
 {
     OpCode_Type_Regular,
-    OpCode_Type_Extended
+    OpCode_Type_Extended,
+    OpCode_Type_Plus_Register
 };
 
 struct OpCode
@@ -98,12 +100,13 @@ struct OpCode
     OpCode_Type type;
     u8 opcode_extension;
     Operand_Type operand_type[2];
+    Size max_imm_size;
     b32 use_modrm;
 };
 
 OpCode
 opc
-(u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, b32 use_modrm)
+(u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, Size max_imm_size, b32 use_modrm)
 {
     
     OpCode result = {};
@@ -112,6 +115,7 @@ opc
     result.opcode_extension = opcode_extension;
     result.operand_type[0] = op_type_0;
     result.operand_type[1] = op_type_1;
+    result.max_imm_size = max_imm_size;
     result.use_modrm = use_modrm;
     return(result);
 }
@@ -127,11 +131,11 @@ global OpCode_List ret;
 
 void
 add_opcode
-(Buffer *buffer, OpCode_List *op_list, u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, b32 use_modrm)
+(Buffer *buffer, OpCode_List *op_list, u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, Size max_imm_size, b32 use_modrm)
 {
     
     OpCode *to_add = (OpCode *)buffer_allocate(buffer, sizeof(OpCode));
-    *to_add = opc(opcode, opcode_type, opcode_extension, op_type_0, op_type_1, use_modrm);
+    *to_add = opc(opcode, opcode_type, opcode_extension, op_type_0, op_type_1, max_imm_size, use_modrm);
     op_list->count++;
     
     if(op_list->start == 0)
@@ -172,13 +176,23 @@ assemble
         {
             if(opcode->operand_type[i] == instruction.operands[i].type)
             {
+                
                 match++;
+                
+                if((instruction.operands[i].size > opcode->max_imm_size) && (opcode->operand_type[i] == Operand_Type_Immediate))
+                {
+                    match--;
+                }
             }
         }
         
         if(match == 2)
         {
             break;
+        }
+        else
+        {
+            opcode = 0;
         }
     }
     
@@ -189,10 +203,11 @@ assemble
     
     u8 modrm = 0;
     u8 rex_byte = 0;
+    u8 reg0 = instruction.operands[0].reg & 0b0111;
     if(opcode->use_modrm)
     {
         
-        u8 reg_mem = (instruction.operands[0].reg & 0b0111);
+        u8 reg_mem = (reg0);
         if(instruction.operands[0].reg & 0b1000)
         {
             rex_byte = Rex_Byte | Rex_B;
@@ -227,7 +242,12 @@ assemble
         buffer_append_u8(buffer, rex_byte);
     }
     
-    buffer_append_u8(buffer, opcode->opcode);
+    u8 op_code = opcode->opcode;
+    if(opcode->type == OpCode_Type_Plus_Register)
+    {
+        op_code = op_code | reg0;
+    }
+    buffer_append_u8(buffer, op_code);
     
     if(modrm != 0)
     {
@@ -310,10 +330,11 @@ WinMainCRTStartup
     
     Buffer buffer_opcode_table = create_buffer(PAGE, PAGE_READWRITE);
     
-    add_opcode(&buffer_opcode_table, &mov, 0x89, OpCode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, true);
-    add_opcode(&buffer_opcode_table, &mov, 0xc7, OpCode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, true);
+    add_opcode(&buffer_opcode_table, &mov, 0x89, OpCode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_None, true);
+    add_opcode(&buffer_opcode_table, &mov, 0xc7, OpCode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_U32, true);
+    add_opcode(&buffer_opcode_table, &mov, 0xb8, OpCode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_U64, false);
     
-    add_opcode(&buffer_opcode_table, &ret, 0xc3, OpCode_Type_Regular, 0, Operand_Type_None, Operand_Type_None, false);
+    add_opcode(&buffer_opcode_table, &ret, 0xc3, OpCode_Type_Regular, 0, Operand_Type_None, Operand_Type_None, Size_None, false);
     
     {    
         
@@ -323,7 +344,7 @@ WinMainCRTStartup
         assemble(&buffer_functions, inst(&mov, r8d, edx));
         assemble(&buffer_functions, inst(&mov, r9d, r8d));
         assemble(&buffer_functions, inst(&mov, eax, r9d));
-        assemble(&buffer_functions, inst(&ret, no_oprnd, no_oprnd));
+        assemble(&buffer_functions, inst(&ret, no_operand, no_operand));
         
         s64 result = some_number(42);
         Assert(result == 42);
@@ -333,21 +354,13 @@ WinMainCRTStartup
         
         fn_void_to_s32 the_answer = (fn_void_to_s32)buffer_functions.end;
         
-        // mov rax, 42
+        Operand imm64 = oper(Operand_Type_Immediate, 0, 42, Size_U64);
         
-        // TODO: When the opcode itself contains the register index, it needs to be properly
-        //       handled in the assemble function.
-        //buffer_append_u8(&buffer_functions, 0x48);
-        //buffer_append_u8(&buffer_functions, 0xb8);
-        //buffer_append_u64(&buffer_functions, 42);
-        //buffer_append_u8(&buffer_functions, 0xc3);
+        assemble(&buffer_functions, inst(&mov, rax, imm64));
+        assemble(&buffer_functions, inst(&mov, rcx, imm64));
+        assemble(&buffer_functions, inst(&ret, no_operand, no_operand));
         
-        Operand imm32 = oper(Operand_Type_Immediate, 0, 42, Size_U32);
-        
-        assemble(&buffer_functions, inst(&mov, rax, imm32));
-        assemble(&buffer_functions, inst(&ret, no_oprnd, no_oprnd));
-        
-        s32 result = the_answer();
+        s64 result = the_answer();
         Assert(result == 42);
     }
     
