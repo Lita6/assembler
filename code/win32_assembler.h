@@ -79,5 +79,6 @@ define_buffer_append(u64)
 typedef s64 (*fn_s64_to_s64)(s64);
 typedef s64 (*fn_void_to_s64)();
 typedef s32 (*fn_void_to_s32)();
+typedef void (*fn_s64_to_void)(s64);
 
 #endif //WIN32_ASSEMBLER_H

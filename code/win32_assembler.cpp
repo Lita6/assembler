@@ -1,9 +1,12 @@
+// TODO: sub rsp, 0xff
+//       add rsp, 0xff
+
 #include <windows.h>
 
 #include "win32_assembler.h"
 
 global u32 PAGE;
-
+#define OPERAND_COUNT 2
 enum REX
 {
     Rex_Byte = 0b01000000,
@@ -11,6 +14,14 @@ enum REX
     Rex_R = 0b00000100,
     Rex_X = 0b00000010,
     Rex_B = 0b00000001
+};
+
+enum MOD
+{
+    MOD_Pointer,
+    MOD_Pointer_Displacement_U8,
+    MOD_Pointer_Displacement_U32,
+    MOD_Registers
 };
 
 enum Size
@@ -99,14 +110,14 @@ struct OpCode
     u8 opcode;
     OpCode_Type type;
     u8 opcode_extension;
-    Operand_Type operand_type[2];
-    Size max_imm_size;
+    Operand_Type operand_type[OPERAND_COUNT];
+    Size operand_size;
     b32 use_modrm;
 };
 
 OpCode
 opc
-(u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, Size max_imm_size, b32 use_modrm)
+(u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, Size operand_size, b32 use_modrm)
 {
     
     OpCode result = {};
@@ -115,7 +126,7 @@ opc
     result.opcode_extension = opcode_extension;
     result.operand_type[0] = op_type_0;
     result.operand_type[1] = op_type_1;
-    result.max_imm_size = max_imm_size;
+    result.operand_size = operand_size;
     result.use_modrm = use_modrm;
     return(result);
 }
@@ -127,15 +138,17 @@ struct OpCode_List
 };
 
 global OpCode_List mov;
+global OpCode_List add;
+global OpCode_List sub;
 global OpCode_List ret;
 
 void
 add_opcode
-(Buffer *buffer, OpCode_List *op_list, u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, Size max_imm_size, b32 use_modrm)
+(Buffer *buffer, OpCode_List *op_list, u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, Size operand_size, b32 use_modrm)
 {
     
     OpCode *to_add = (OpCode *)buffer_allocate(buffer, sizeof(OpCode));
-    *to_add = opc(opcode, opcode_type, opcode_extension, op_type_0, op_type_1, max_imm_size, use_modrm);
+    *to_add = opc(opcode, opcode_type, opcode_extension, op_type_0, op_type_1, operand_size, use_modrm);
     op_list->count++;
     
     if(op_list->start == 0)
@@ -147,18 +160,20 @@ add_opcode
 struct Instruction
 {
     OpCode_List *opcode;
-    Operand operands[2];
+    Operand operands[OPERAND_COUNT];
+    MOD mode;
 };
 
 Instruction
 inst
-(OpCode_List *opcode, Operand opr0, Operand opr1)
+(OpCode_List *opcode, Operand opr0, Operand opr1, MOD mode)
 {
     
     Instruction result = {};
     result.opcode = opcode;
     result.operands[0] = opr0;
     result.operands[1] = opr1;
+    result.mode = mode;
     return(result);
 }
 
@@ -170,23 +185,31 @@ assemble
     OpCode *opcode = 0;
     for(u32 i = 0; i < instruction.opcode->count; i++)
     {
+        
         opcode = instruction.opcode->start + i;
         u32 match = 0;
-        for(u32 i = 0; i < 2; i++)
+        for(u32 i = 0; i < OPERAND_COUNT; i++)
         {
+            
             if(opcode->operand_type[i] == instruction.operands[i].type)
             {
                 
-                match++;
-                
-                if((instruction.operands[i].size > opcode->max_imm_size) && (opcode->operand_type[i] == Operand_Type_Immediate))
+                if(instruction.operands[i].type == Operand_Type_Immediate)
                 {
-                    match--;
+                    
+                    if(opcode->operand_size == instruction.operands[i].size)
+                    {
+                        match++;
+                    }
+                }
+                else
+                {
+                    match++;
                 }
             }
         }
         
-        if(match == 2)
+        if(match == OPERAND_COUNT)
         {
             break;
         }
@@ -227,8 +250,7 @@ assemble
             reg_opcode = opcode->opcode_extension;
         }
         
-        // TODO: Properly set mode.
-        modrm = 0b11000000 | (reg_opcode << 3) | reg_mem;
+        modrm = (instruction.mode << 6) | (reg_opcode << 3) | reg_mem;
         
     }
     
@@ -249,7 +271,7 @@ assemble
     }
     buffer_append_u8(buffer, op_code);
     
-    if(modrm != 0)
+    if(opcode->use_modrm != 0)
     {
         buffer_append_u8(buffer, modrm);
     }
@@ -293,6 +315,7 @@ WinMainCRTStartup
     PAGE = SysInfo.dwPageSize;
     
     Buffer buffer_functions = create_buffer(PAGE, PAGE_EXECUTE_READWRITE);
+    Buffer buffer_junk = create_buffer(PAGE, PAGE_READWRITE);
     
     rax = oper(Operand_Type_Register, 0, 0, Size_U64);
     rcx = oper(Operand_Type_Register, 1, 0, Size_U64);
@@ -340,11 +363,11 @@ WinMainCRTStartup
         
         fn_s64_to_s64 some_number = (fn_s64_to_s64)buffer_functions.end;
         
-        assemble(&buffer_functions, inst(&mov, edx, ecx));
-        assemble(&buffer_functions, inst(&mov, r8d, edx));
-        assemble(&buffer_functions, inst(&mov, r9d, r8d));
-        assemble(&buffer_functions, inst(&mov, eax, r9d));
-        assemble(&buffer_functions, inst(&ret, no_operand, no_operand));
+        assemble(&buffer_functions, inst(&mov, edx, ecx, MOD_Registers));
+        assemble(&buffer_functions, inst(&mov, r8d, edx, MOD_Registers));
+        assemble(&buffer_functions, inst(&mov, r9d, r8d, MOD_Registers));
+        assemble(&buffer_functions, inst(&mov, eax, r9d, MOD_Registers));
+        assemble(&buffer_functions, inst(&ret, no_operand, no_operand, MOD_Registers));
         
         s64 result = some_number(42);
         Assert(result == 42);
@@ -356,12 +379,26 @@ WinMainCRTStartup
         
         Operand imm64 = oper(Operand_Type_Immediate, 0, 42, Size_U64);
         
-        assemble(&buffer_functions, inst(&mov, rax, imm64));
-        assemble(&buffer_functions, inst(&mov, rcx, imm64));
-        assemble(&buffer_functions, inst(&ret, no_operand, no_operand));
+        assemble(&buffer_functions, inst(&mov, rax, imm64, MOD_Registers));
+        assemble(&buffer_functions, inst(&mov, rcx, imm64, MOD_Registers));
+        assemble(&buffer_functions, inst(&ret, no_operand, no_operand, MOD_Registers));
         
         s64 result = the_answer();
         Assert(result == 42);
+    }
+    
+    {
+        
+        fn_s64_to_void write_to_pointer  = (fn_s64_to_void)buffer_functions.end;
+        
+        Operand imm64 = oper(Operand_Type_Immediate, 0, 42, Size_U64);
+        
+        assemble(&buffer_functions, inst(&mov, rax, imm64, MOD_Registers));
+        assemble(&buffer_functions, inst(&mov, rcx, rax, MOD_Pointer));
+        assemble(&buffer_functions, inst(&ret, no_operand, no_operand, MOD_Registers));
+        
+        write_to_pointer((s64)buffer_junk.memory);
+        Assert(*(s64 *)buffer_junk.memory == 42);
     }
     
     return(0);
