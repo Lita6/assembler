@@ -1,5 +1,4 @@
 // TODO: sub rsp, 0xff
-//       add rsp, 0xff
 
 #include <windows.h>
 
@@ -357,6 +356,10 @@ WinMainCRTStartup
     add_opcode(&buffer_opcode_table, &mov, 0xc7, OpCode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_U32, true);
     add_opcode(&buffer_opcode_table, &mov, 0xb8, OpCode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_U64, false);
     
+    add_opcode(&buffer_opcode_table, &add, 0x83, OpCode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_U8, true);
+    
+    add_opcode(&buffer_opcode_table, &sub, 0x83, OpCode_Type_Extended, 5, Operand_Type_Register, Operand_Type_Immediate, Size_U8, true);
+    
     add_opcode(&buffer_opcode_table, &ret, 0xc3, OpCode_Type_Regular, 0, Operand_Type_None, Operand_Type_None, Size_None, false);
     
     {    
@@ -399,6 +402,20 @@ WinMainCRTStartup
         
         write_to_pointer((s64)buffer_junk.memory);
         Assert(*(s64 *)buffer_junk.memory == 42);
+    }
+    
+    {
+        
+        fn_s64_to_s64 not_the_answer = (fn_s64_to_s64)buffer_functions.end;
+        
+        Operand imm8 = oper(Operand_Type_Immediate, 0, 1, Size_U8);
+        
+        assemble(&buffer_functions, inst(&sub, rcx, imm8, MOD_Registers));
+        assemble(&buffer_functions, inst(&mov, rax, rcx, MOD_Registers));
+        assemble(&buffer_functions, inst(&ret, no_operand, no_operand, MOD_Registers));
+        
+        s64 result = not_the_answer(42);
+        Assert(result = 41);
     }
     
     return(0);
