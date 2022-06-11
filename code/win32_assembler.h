@@ -31,15 +31,15 @@ struct Buffer
 {
     u8 *memory;
     u8 *end;
-    s32 size;
+    u32 size;
 };
 
 Buffer
 create_buffer
-(s32 size, u64 permission)
+(u32 size, s32 permission)
 {
     Buffer buffer = {};
-    buffer.memory = (u8 *)(VirtualAlloc(0, size, MEM_COMMIT | MEM_RESERVE, permission));
+    buffer.memory = (u8 *)(VirtualAlloc(0, (SIZE_T)size, MEM_COMMIT | MEM_RESERVE, (DWORD)permission));
     Assert(buffer.memory);
     buffer.end = buffer.memory;
     buffer.size = size;
@@ -76,9 +76,52 @@ define_buffer_append(u32)
 define_buffer_append(u64)
 #undef define_buffer_append
 
+struct String
+{
+    u8 *chars;
+    u32 len;
+};
+
+String
+create_string
+(Buffer *buffer, char *str)
+{
+    
+    String result = {};
+    result.chars = buffer->end;
+    
+    u8 *index = (u8 *)str;
+    while(*index)
+    {
+        buffer_append_u8(buffer, *index++);
+        result.len++;
+    }
+    
+    return(result);
+}
+
+u32
+scan_string
+(String string, u8 ch)
+{
+    
+    u32 result = 0;
+    for(u32 i = 0; i < string.len; i++)
+    {
+        if(string.chars[i] == ch)
+        {
+            result = i;
+            break;
+        }
+    }
+    
+    return(result);
+}
+
 typedef s64 (*fn_s64_to_s64)(s64);
 typedef s64 (*fn_void_to_s64)();
 typedef s32 (*fn_void_to_s32)();
 typedef void (*fn_s64_to_void)(s64);
+typedef void (*fn_u32_to_void)(u32);
 
 #endif //WIN32_ASSEMBLER_H
