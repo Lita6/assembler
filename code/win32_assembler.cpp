@@ -1,11 +1,10 @@
-// TODO: sub rsp, 0xff
-
 #include <windows.h>
 
 #include "win32_assembler.h"
 
 global u32 PAGE;
 #define OPERAND_COUNT 2
+
 enum REX
 {
     Rex_Byte = 0b01000000,
@@ -36,12 +35,12 @@ enum Operand_Type
 {
     Operand_Type_None,
     Operand_Type_Register,
+    Operand_Type_Memory,
     Operand_Type_Immediate
 };
 
 struct Operand
 {
-    
     Operand_Type type;
     u8 reg;
     u64 imm;
@@ -97,57 +96,69 @@ oper
     return(result);
 }
 
-enum OpCode_Type
+enum Opcode_Type
 {
-    OpCode_Type_Regular,
-    OpCode_Type_Extended,
-    OpCode_Type_Plus_Register
+    Opcode_Type_Regular,
+    Opcode_Type_Extended,
+    Opcode_Type_Plus_Register
 };
 
-struct OpCode
+enum Opcode_Operand_Type
 {
-    u8 opcode;
-    OpCode_Type type;
+    Opcode_Operand_Type_None,
+    Opcode_Operand_Type_Only_Register,
+    Opcode_Operand_Type_Register_Memory,
+    Opcode_Operand_Type_Immediate
+};
+
+struct Opcode
+{
+    u8 base_opcode;
+    Opcode_Type type;
     u8 opcode_extension;
-    Operand_Type operand_type[OPERAND_COUNT];
-    Size operand_size;
+    Opcode_Operand_Type operand_type[OPERAND_COUNT];
+    Size imm_size;
     b32 use_modrm;
+    b32 rex_changes_size;
+    u8 sign_extend_mask;
+    u8 into_reg_mask;
+    u8 width_mask;
 };
 
-OpCode
+Opcode
 opc
-(u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, Size operand_size, b32 use_modrm)
+(u8 base_opcode, Opcode_Type opcode_type, u8 opcode_extension, Opcode_Operand_Type op_type_0, Opcode_Operand_Type op_type_1, Size imm_size, b32 use_modrm, b32 rex_changes_size, u8 sign_extend_mask, u8 into_reg_mask, u8 width_mask)
 {
     
-    OpCode result = {};
-    result.opcode = opcode;
+    Opcode result = {};
+    result.base_opcode = base_opcode;
     result.type = opcode_type;
     result.opcode_extension = opcode_extension;
     result.operand_type[0] = op_type_0;
     result.operand_type[1] = op_type_1;
-    result.operand_size = operand_size;
+    result.imm_size = imm_size;
     result.use_modrm = use_modrm;
+    result.rex_changes_size = rex_changes_size;
+    result.sign_extend_mask = sign_extend_mask;
+    result.into_reg_mask = into_reg_mask;
+    result.width_mask = width_mask;
     return(result);
 }
 
-struct OpCode_List
+struct Opcode_List
 {
-    OpCode *start;
+    String name;
+    Opcode *start;
     u32 count;
 };
 
-global OpCode_List mov;
-global OpCode_List add;
-global OpCode_List sub;
-global OpCode_List ret;
-
 void
 add_opcode
-(Buffer *buffer, OpCode_List *op_list, u8 opcode, OpCode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, Size operand_size, b32 use_modrm)
+(Buffer *buffer, Opcode_List *op_list, u8 base_opcode, Opcode_Type opcode_type, u8 opcode_extension, Opcode_Operand_Type op_type_0, Opcode_Operand_Type op_type_1, Size imm_size, b32 use_modrm, b32 rex_changes_size, u8 sign_extend_mask, u8 into_reg_mask, u8 width_mask)
 {
     
-    OpCode *to_add = (OpCode *)buffer_allocate(buffer, sizeof(OpCode));
-    *to_add = opc(opcode, opcode_type, opcode_extension, op_type_0, op_type_1, operand_size, use_modrm);
+    Opcode *to_add = (Opcode *)buffer_allocate(buffer, sizeof(Opcode));
+    *to_add = opc(base_opcode, opcode_type, opcode_extension, op_type_0, op_type_1, imm_size, use_modrm, rex_changes_size, sign_extend_mask, into_reg_mask, width_mask);
     op_list->count++;
     
     if(op_list->start == 0)
@@ -156,16 +167,63 @@ add_opcode
     }
 }
 
+struct Operation_Code
+{
+    void *next_table;
+    Opcode_Type type;
+};
+
+global Operation_Code operation_code_table[16][16];
+
+void
+add_code_table_entry
+(u8 opcode, void *list, Opcode_Type type)
+{
+    
+    u8 x = (u8)((opcode >> 4) & 0x0f);
+    u8 y = (u8)(opcode & 0x0f);
+    operation_code_table[x][y].next_table = list;
+    operation_code_table[x][y].type = type;
+}
+
+// TODO: I need to add a global dynamic list of operations that each have a string and a pointer to the matching opcode list, so I can search for the string and get pointed to the right list of opcodes.
+
+struct Opcode_Name
+{
+    String name;
+    Opcode_List *opcodes;
+};
+
+struct Opcode_Name_Table
+{
+    Opcode_Name *start;
+    u32 count;
+};
+
+global Opcode_Name_Table name_table;
+
+void
+add_opcode_list
+(Buffer *buffer, Opcode_List *list, String name)
+{
+    Opcode_Name *opcode_name = (Opcode_Name *)buffer_allocate(buffer, sizeof(Opcode_Name));
+    
+    opcode_name->name = name;
+    opcode_name->opcodes = list;
+    
+    name_table.count++;
+}
+
 struct Instruction
 {
-    OpCode_List *opcode;
+    Opcode_List *opcode;
     Operand operands[OPERAND_COUNT];
     MOD mode;
 };
 
 Instruction
 inst
-(OpCode_List *opcode, Operand opr0, Operand opr1, MOD mode)
+(Opcode_List *opcode, Operand opr0, Operand opr1, MOD mode)
 {
     
     Instruction result = {};
@@ -181,40 +239,31 @@ assemble
 (Buffer *buffer, Instruction instruction)
 {
     
-    OpCode *opcode = 0;
+    Opcode *opcode_to_check = 0;
+    Opcode *opcode = 0;
     for(u32 i = 0; i < instruction.opcode->count; i++)
     {
         
-        opcode = instruction.opcode->start + i;
-        u32 match = 0;
-        for(u32 i = 0; i < OPERAND_COUNT; i++)
+        opcode_to_check = instruction.opcode->start + i;
+        
+        if((opcode_to_check->operand_type[0] == instruction.operands[0].type) && (opcode_to_check->operand_type[1] == instruction.operands[1].type))
         {
-            
-            if(opcode->operand_type[i] == instruction.operands[i].type)
+            if(instruction.operands[1].type == Operand_Type_Immediate)
             {
-                
-                if(instruction.operands[i].type == Operand_Type_Immediate)
+                if(opcode_to_check->imm_size == instruction.operands[1].size)
                 {
-                    
-                    if(opcode->operand_size == instruction.operands[i].size)
-                    {
-                        match++;
-                    }
+                    opcode = instruction.opcode->start + i;
                 }
-                else
-                {
-                    match++;
-                }
+            }
+            else
+            {
+                opcode = instruction.opcode->start + i;
             }
         }
         
-        if(match == OPERAND_COUNT)
+        if(opcode != 0)
         {
             break;
-        }
-        else
-        {
-            opcode = 0;
         }
     }
     
@@ -225,7 +274,7 @@ assemble
     
     u8 modrm = 0;
     u8 rex_byte = 0;
-    u8 reg0 = instruction.operands[0].reg & 0b0111;
+    u8 reg0 = (u8)(instruction.operands[0].reg & 0b00000111);
     if(opcode->use_modrm)
     {
         
@@ -238,18 +287,18 @@ assemble
         u8 reg_opcode = 0;
         if(instruction.operands[1].type == Operand_Type_Register)
         {        
-            reg_opcode = (instruction.operands[1].reg & 0b0111);
+            reg_opcode = (u8)(instruction.operands[1].reg & 0b0111);
             if(instruction.operands[1].reg & 0b1000)
             {
                 rex_byte |= Rex_Byte | Rex_R;
             }
         }
-        else if(opcode->type == OpCode_Type_Extended)
+        else if(opcode->type == Opcode_Type_Extended)
         {
             reg_opcode = opcode->opcode_extension;
         }
         
-        modrm = (instruction.mode << 6) | (reg_opcode << 3) | reg_mem;
+        modrm = (u8)((instruction.mode << 6) | (reg_opcode << 3) | reg_mem);
         
     }
     
@@ -263,10 +312,10 @@ assemble
         buffer_append_u8(buffer, rex_byte);
     }
     
-    u8 op_code = opcode->opcode;
-    if(opcode->type == OpCode_Type_Plus_Register)
+    u8 op_code = opcode->base_opcode;
+    if(opcode->type == Opcode_Type_Plus_Register)
     {
-        op_code = op_code | reg0;
+        op_code = (u8)(op_code | reg0);
     }
     buffer_append_u8(buffer, op_code);
     
@@ -298,15 +347,39 @@ assemble
             {
                 buffer_append_u64(buffer, (u64)instruction.operands[1].imm);
             }break;
+            
+            case Size_None:
+            {
+                Assert(!"Improperly initialized immediate operand. Needs a size.");
+            }break;
         };
         
     }
+}
+
+void
+parse_instruction
+(Buffer *buffer)
+{
+    
+    Instruction result = {};
+    
+    String line = create_string(buffer, "mov rax, rcx");
+    u32 ch = scan_string(line, ' ');
+    Assert(ch != 0);
+    
+    String operation = {};
+    operation.chars = line.chars;
+    operation.len = ch - 1;
 }
 
 int __stdcall
 WinMainCRTStartup
 (void)
 {
+    
+    //HMODULE kernel32_lib = LoadLibraryA("Kernel32.dll");
+    //Exit = (fn_u32_to_void)GetProcAddress(kernel32_lib, "ExitProcess");
     
     SYSTEM_INFO SysInfo = {};
     GetSystemInfo(&SysInfo);
@@ -315,6 +388,7 @@ WinMainCRTStartup
     
     Buffer buffer_functions = create_buffer(PAGE, PAGE_EXECUTE_READWRITE);
     Buffer buffer_junk = create_buffer(PAGE, PAGE_READWRITE);
+    Buffer buffer_strings = create_buffer(PAGE, PAGE_READWRITE);
     
     rax = oper(Operand_Type_Register, 0, 0, Size_U64);
     rcx = oper(Operand_Type_Register, 1, 0, Size_U64);
@@ -351,25 +425,84 @@ WinMainCRTStartup
     r15d = oper(Operand_Type_Register, 15, 0, Size_U32);
     
     Buffer buffer_opcode_table = create_buffer(PAGE, PAGE_READWRITE);
+    Buffer buffer_opcode_name_table = create_buffer(PAGE, PAGE_READWRITE);
+    name_table.start = (Opcode_Name *)buffer_opcode_name_table.memory;
     
-    add_opcode(&buffer_opcode_table, &mov, 0x89, OpCode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_None, true);
-    add_opcode(&buffer_opcode_table, &mov, 0xc7, OpCode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_U32, true);
-    add_opcode(&buffer_opcode_table, &mov, 0xb8, OpCode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_U64, false);
+    Opcode_List mov = {};
+    String name = create_string(&buffer_strings, "mov");
+    add_opcode_list(&buffer_opcode_name_table, &mov, name);
     
-    add_opcode(&buffer_opcode_table, &add, 0x83, OpCode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_U8, true);
+    add_opcode(&buffer_opcode_table, &mov, 0x88, Opcode_Type_Regular, 0, Opcode_Operand_Type_Register_Memory, Opcode_Operand_Type_Register_Memory, Size_U32, true, true, 0, 0b00000010, 0b00000001);
+    {
+        add_code_table_entry(0x88, (void *)(&mov), Opcode_Type_Regular);
+        add_code_table_entry(0x89, (void *)(&mov), Opcode_Type_Regular);
+        add_code_table_entry(0x8a, (void *)(&mov), Opcode_Type_Regular);
+        add_code_table_entry(0x8b, (void *)(&mov), Opcode_Type_Regular);
+    }
     
-    add_opcode(&buffer_opcode_table, &sub, 0x83, OpCode_Type_Extended, 5, Operand_Type_Register, Operand_Type_Immediate, Size_U8, true);
+    Operation_Code Extension_C6[8] = {};
+    Extension_C6[0].next_table = (void*)(&mov);
+    Operation_Code Extension_C7[8] = {};
+    Extension_C7[0].next_table = (void*)(&mov);
+    add_opcode(&buffer_opcode_table, &mov, 0xc6, Opcode_Type_Extended, 0, Opcode_Operand_Type_Register_Memory, Opcode_Operand_Type_Immediate, Size_U32, true, false, 0, 0, 0b00000001);
+    {
+        add_code_table_entry(0xc6, (void *)(&Extension_C6), Opcode_Type_Extended);
+        add_code_table_entry(0xc7, (void *)(&Extension_C7), Opcode_Type_Extended);
+    }
     
-    add_opcode(&buffer_opcode_table, &ret, 0xc3, OpCode_Type_Regular, 0, Operand_Type_None, Operand_Type_None, Size_None, false);
+    add_opcode(&buffer_opcode_table, &mov, 0xb0, Opcode_Type_Plus_Register, 0, Opcode_Operand_Type_Only_Register, Opcode_Operand_Type_Immediate, Size_U32, false, true, 0, 0, 0b00001000);
+    {
+        add_code_table_entry(0xb0, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xb1, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xb2, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xb3, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xb4, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xb5, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xb6, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xb7, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xb8, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xb9, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xba, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xbb, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xbc, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xbd, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xbe, (void *)(&mov), Opcode_Type_Plus_Register);
+        add_code_table_entry(0xbf, (void *)(&mov), Opcode_Type_Plus_Register);
+    }
     
-    {    
-        
+    Opcode_List add = {};
+    name = create_string(&buffer_strings, "add");
+    add_opcode_list(&buffer_opcode_name_table, &add, name);
+    
+    Operation_Code Extension_83[8] = {};
+    Extension_83[0].next_table = (void *)(&add);
+    add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Opcode_Operand_Type_Register_Memory, Opcode_Operand_Type_Immediate, Size_U8, true, false, 0, 0, 0);
+    {
+        add_code_table_entry(0x83, (void *)(&Extension_83), Opcode_Type_Extended);
+    }
+    
+    Opcode_List sub = {};
+    name = create_string(&buffer_strings, "sub");
+    add_opcode_list(&buffer_opcode_name_table, &sub, name);
+    
+    Extension_83[5].next_table = (void *)(&sub);
+    add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Opcode_Operand_Type_Register_Memory, Opcode_Operand_Type_Immediate, Size_U8, true, false, 0, 0, 0);
+    
+    Opcode_List ret = {};
+    name = create_string(&buffer_strings, "ret");
+    add_opcode_list(&buffer_opcode_name_table, &sub, name);
+    
+    add_opcode(&buffer_opcode_table, &ret, 0xc3, Opcode_Type_Regular, 0, Opcode_Operand_Type_None, Opcode_Operand_Type_None, Size_None, false, false, 0, 0, 0);
+    {
+        add_code_table_entry(0xc3, (void *)(&ret), Opcode_Type_Regular);
+    }
+    
+    // TESTS
+    
+    {
         fn_s64_to_s64 some_number = (fn_s64_to_s64)buffer_functions.end;
         
-        assemble(&buffer_functions, inst(&mov, edx, ecx, MOD_Registers));
-        assemble(&buffer_functions, inst(&mov, r8d, edx, MOD_Registers));
-        assemble(&buffer_functions, inst(&mov, r9d, r8d, MOD_Registers));
-        assemble(&buffer_functions, inst(&mov, eax, r9d, MOD_Registers));
+        assemble(&buffer_functions, inst(&mov, rax, rcx, MOD_Registers));
         assemble(&buffer_functions, inst(&ret, no_operand, no_operand, MOD_Registers));
         
         s64 result = some_number(42);
@@ -377,7 +510,6 @@ WinMainCRTStartup
     }
     
     {
-        
         fn_void_to_s32 the_answer = (fn_void_to_s32)buffer_functions.end;
         
         Operand imm64 = oper(Operand_Type_Immediate, 0, 42, Size_U64);
@@ -391,7 +523,6 @@ WinMainCRTStartup
     }
     
     {
-        
         fn_s64_to_void write_to_pointer  = (fn_s64_to_void)buffer_functions.end;
         
         Operand imm64 = oper(Operand_Type_Immediate, 0, 42, Size_U64);
@@ -405,7 +536,6 @@ WinMainCRTStartup
     }
     
     {
-        
         fn_s64_to_s64 not_the_answer = (fn_s64_to_s64)buffer_functions.end;
         
         Operand imm8 = oper(Operand_Type_Immediate, 0, 1, Size_U8);
@@ -415,8 +545,10 @@ WinMainCRTStartup
         assemble(&buffer_functions, inst(&ret, no_operand, no_operand, MOD_Registers));
         
         s64 result = not_the_answer(42);
-        Assert(result = 41);
+        Assert(result == 41);
     }
     
-    return(0);
+    parse_instruction(&buffer_strings);
+    
+    ExitProcess(0);
 }
