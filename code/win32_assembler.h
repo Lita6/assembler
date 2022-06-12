@@ -123,5 +123,6 @@ typedef s64 (*fn_void_to_s64)();
 typedef s32 (*fn_void_to_s32)();
 typedef void (*fn_s64_to_void)(s64);
 typedef void (*fn_u32_to_void)(u32);
+typedef void (*fn_void_to_void)();
 
 #endif //WIN32_ASSEMBLER_H
