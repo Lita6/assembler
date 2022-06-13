@@ -114,7 +114,7 @@ struct Opcode
 {
     u8 machine_code;
     Opcode_Type type;
-    u8 opcode_extension;
+    u8 extension;
     Operand_Type operand_type[OPERAND_COUNT];
     Size operand_size[OPERAND_COUNT];
     b32 use_modrm;
@@ -125,13 +125,13 @@ struct Opcode
 
 Opcode
 opc
-(u8 machine_code, Opcode_Type opcode_type, u8 opcode_extension, Operand_Type op_type_0, Operand_Type op_type_1, Size operand_0_size, Size operand_1_size, b32 use_modrm, b32 into_reg, Reg_Effect reg_effect, u8 rex_byte)
+(u8 machine_code, Opcode_Type opcode_type, u8 extension, Operand_Type op_type_0, Operand_Type op_type_1, Size operand_0_size, Size operand_1_size, b32 use_modrm, b32 into_reg, Reg_Effect reg_effect, u8 rex_byte)
 {
     
     Opcode result = {};
     result.machine_code = machine_code;
     result.type = opcode_type;
-    result.opcode_extension = opcode_extension;
+    result.extension = extension;
     result.operand_type[0] = op_type_0;
     result.operand_type[1] = op_type_1;
     result.operand_size[0] = operand_0_size;
@@ -197,19 +197,17 @@ struct Instruction
 {
     Opcode_List *opcode;
     Operand operands[OPERAND_COUNT];
-    MOD mode;
 };
 
 Instruction
 inst
-(Opcode_List *opcode, Operand opr0, Operand opr1, MOD mode)
+(Opcode_List *opcode, Operand opr0, Operand opr1)
 {
     
     Instruction result = {};
     result.opcode = opcode;
     result.operands[0] = opr0;
     result.operands[1] = opr1;
-    result.mode = mode;
     return(result);
 }
 
@@ -242,40 +240,64 @@ assemble
         }
     }
     
-    // TODO: How much of a mess is the rest of this now???
-    u8 modrm = 0;
-    u8 rex_byte = 0;
-    u8 reg0 = (u8)(instruction.operands[0].reg & 0b00000111);
-    if(operation->use_modrm)
+    Assert(operation != 0);
+    
+    u8 reg_opcode = 0;
+    u8 reg_mem = 0;
+    u8 opcode = operation->machine_code;
+    u8 rex_byte = operation->rex_byte;
+    if(operation->type == Opcode_Type_Regular)
     {
         
-        u8 reg_mem = (reg0);
-        if(instruction.operands[0].reg & 0b1000)
+        if(operation->use_modrm == 1)
         {
-            rex_byte = Rex_Byte | Rex_B;
-        }
-        
-        u8 reg_opcode = 0;
-        if(instruction.operands[1].type == Operand_Type_Register)
-        {        
-            reg_opcode = (u8)(instruction.operands[1].reg & 0b0111);
-            if(instruction.operands[1].reg & 0b1000)
+            u8 mem_index = 0;
+            u8 reg_index = 0;
+            if(operation->into_reg == 0)
             {
-                rex_byte |= Rex_Byte | Rex_R;
+                reg_index = 1;
+            }
+            else
+            {
+                mem_index = 1;
+            }
+            
+            if((instruction.operands[mem_index].type == Operand_Type_Register) ||
+               (instruction.operands[mem_index].type == Operand_Type_Memory))
+            {
+                reg_mem = (u8)(instruction.operands[mem_index].reg & 0b0111);
+                if((instruction.operands[mem_index].reg & 0b1000) != 0)
+                {
+                    rex_byte = (u8)(rex_byte | Rex_Byte | Rex_B);
+                }
+            }
+            
+            if(instruction.operands[reg_index].type == Operand_Type_Register)
+            {
+                
+                reg_opcode = (u8)(instruction.operands[reg_index].reg & 0b0111);
+                if((instruction.operands[reg_index].reg & 0b1000) != 0)
+                {
+                    rex_byte = (u8)(rex_byte | Rex_Byte | Rex_R);
+                }
             }
         }
-        else if(operation->type == Opcode_Type_Extended)
-        {
-            reg_opcode = operation->opcode_extension;
-        }
-        
-        modrm = (u8)((instruction.mode << 6) | (reg_opcode << 3) | reg_mem);
-        
     }
-    
-    if((instruction.operands[0].size == Size_64) || (instruction.operands[1].size == Size_64))
+    else if(operation->type == Opcode_Type_Extended)
     {
-        rex_byte |= Rex_Byte | Rex_W;
+        
+        reg_opcode = operation->extension;
+        reg_mem = (u8)(instruction.operands[0].reg & 0b0111);
+        if((instruction.operands[0].reg & 0b1000) != 0)
+        {
+            rex_byte = (u8)(rex_byte | Rex_Byte | Rex_B);
+        }
+    }
+    else if(operation->type == Opcode_Type_Plus_Register)
+    {
+        
+        // Are these always immediate into register/memory?
+        opcode = (u8)(opcode | (instruction.operands[0].reg & 0b0111));
     }
     
     if(rex_byte != 0)
@@ -283,15 +305,21 @@ assemble
         buffer_append_u8(buffer, rex_byte);
     }
     
-    u8 op_code = operation->machine_code;
-    if(operation->type == Opcode_Type_Plus_Register)
-    {
-        op_code = (u8)(op_code | reg0);
-    }
-    buffer_append_u8(buffer, op_code);
+    buffer_append_u8(buffer, opcode);
     
     if(operation->use_modrm != 0)
     {
+        
+        u8 modrm = 0;
+        u8 mode = MOD_Registers;
+        if((instruction.operands[0].type == Operand_Type_Memory) ||
+           (instruction.operands[1].type == Operand_Type_Memory))
+        {
+            // TODO: need to support memory displacements
+            mode = MOD_Pointer;
+        }
+        
+        modrm = (u8)((mode << 6) | (reg_opcode << 3) | (reg_mem << 0));
         buffer_append_u8(buffer, modrm);
     }
     
@@ -369,8 +397,8 @@ WinMainCRTStartup
     rbp = oper(Operand_Type_Register, 5, 0, Size_64);
     rsi = oper(Operand_Type_Register, 6, 0, Size_64);
     rdi = oper(Operand_Type_Register, 7, 0, Size_64);
-    r8 = oper(Operand_Type_Register, 8, 0, Size_64);
-    r9 = oper(Operand_Type_Register, 9, 0, Size_64);
+    r8  = oper(Operand_Type_Register, 8, 0, Size_64);
+    r9  = oper(Operand_Type_Register, 9, 0, Size_64);
     r10 = oper(Operand_Type_Register, 10, 0, Size_64);
     r11 = oper(Operand_Type_Register, 11, 0, Size_64);
     r12 = oper(Operand_Type_Register, 12, 0, Size_64);
@@ -378,16 +406,16 @@ WinMainCRTStartup
     r14 = oper(Operand_Type_Register, 14, 0, Size_64);
     r15 = oper(Operand_Type_Register, 15, 0, Size_64);
     
-    eax = oper(Operand_Type_Register, 0, 0, Size_32);
-    ecx = oper(Operand_Type_Register, 1, 0, Size_32);
-    edx = oper(Operand_Type_Register, 2, 0, Size_32);
-    ebx = oper(Operand_Type_Register, 3, 0, Size_32);
-    esp = oper(Operand_Type_Register, 4, 0, Size_32);
-    ebp = oper(Operand_Type_Register, 5, 0, Size_32);
-    esi = oper(Operand_Type_Register, 6, 0, Size_32);
-    edi = oper(Operand_Type_Register, 7, 0, Size_32);
-    r8d = oper(Operand_Type_Register, 8, 0, Size_32);
-    r9d = oper(Operand_Type_Register, 9, 0, Size_32);
+    eax  = oper(Operand_Type_Register, 0, 0, Size_32);
+    ecx  = oper(Operand_Type_Register, 1, 0, Size_32);
+    edx  = oper(Operand_Type_Register, 2, 0, Size_32);
+    ebx  = oper(Operand_Type_Register, 3, 0, Size_32);
+    esp  = oper(Operand_Type_Register, 4, 0, Size_32);
+    ebp  = oper(Operand_Type_Register, 5, 0, Size_32);
+    esi  = oper(Operand_Type_Register, 6, 0, Size_32);
+    edi  = oper(Operand_Type_Register, 7, 0, Size_32);
+    r8d  = oper(Operand_Type_Register, 8, 0, Size_32);
+    r9d  = oper(Operand_Type_Register, 9, 0, Size_32);
     r10d = oper(Operand_Type_Register, 10, 0, Size_32);
     r11d = oper(Operand_Type_Register, 11, 0, Size_32);
     r12d = oper(Operand_Type_Register, 12, 0, Size_32);
@@ -407,35 +435,39 @@ WinMainCRTStartup
     add_opcode(&buffer_opcode_table, &mov, 0x88, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_8, Size_8, true, false, Reg_Effect_Nothing, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_32, Size_32, true, false, Reg_Effect_Zero_Extends, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_32, Size_32, true, false, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_64, Size_64, true, false, Reg_Effect_Zero_Extends, 0x48);
-    add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_64, Size_64, true, false, Reg_Effect_Zero_Extends, 0x48);
+    add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_64, Size_64, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_64, Size_64, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
     add_opcode(&buffer_opcode_table, &mov, 0x8a, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_8, Size_8, true, true, Reg_Effect_Nothing, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x8a, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Memory, Size_8, Size_8, true, true, Reg_Effect_Nothing, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_32, Size_32, true, true, Reg_Effect_Zero_Extends, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_32, Size_32, true, true, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_64, Size_64, true, true, Reg_Effect_Zero_Extends, 0x48);
-    add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_64, Size_64, true, true, Reg_Effect_Zero_Extends, 0x48);
-    add_opcode(&buffer_opcode_table, &mov, 0xb0, Opcode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_8, Size_8, true, false, Reg_Effect_Nothing, 0);
-    add_opcode(&buffer_opcode_table, &mov, 0xb8, Opcode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_32, Size_32, true, false, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &mov, 0xb8, Opcode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_64, true, false, Reg_Effect_Zero_Extends, 0x48);
+    add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_64, Size_64, true, true, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_64, Size_64, true, true, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &mov, 0xb0, Opcode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_8, Size_8, false, false, Reg_Effect_Nothing, 0);
+    add_opcode(&buffer_opcode_table, &mov, 0xb8, Opcode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_32, Size_32, false, false, Reg_Effect_Zero_Extends, 0);
+    add_opcode(&buffer_opcode_table, &mov, 0xb8, Opcode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_64, false, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
     add_opcode(&buffer_opcode_table, &mov, 0xc6, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_8, Size_8, true, false, Reg_Effect_Nothing, 0);
     add_opcode(&buffer_opcode_table, &mov, 0xc7, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_32, Size_32, true, false, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &mov, 0xc7, Opcode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_32, true, false, Reg_Effect_Sign_Extends, 0x48);
-    add_opcode(&buffer_opcode_table, &mov, 0xc7, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_32, true, false, Reg_Effect_Sign_Extends, 0x48);
+    add_opcode(&buffer_opcode_table, &mov, 0xc7, Opcode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_32, true, false, Reg_Effect_Sign_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &mov, 0xc7, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_32, true, false, Reg_Effect_Sign_Extends, Rex_Byte | Rex_W);
     
     Opcode_List add = {};
     name = create_string(&buffer_strings, "add");
     add_opcode_list(&buffer_opcode_name_table, &add, name);
     
     add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, 0x48);
+    add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
+    add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
     
     Opcode_List sub = {};
     name = create_string(&buffer_strings, "sub");
     add_opcode_list(&buffer_opcode_name_table, &sub, name);
     
-    add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 5, Operand_Type_Register, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 5, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, 0x48);
+    add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Register, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
+    add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Memory, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
+    add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
     
     Opcode_List ret = {};
     name = create_string(&buffer_strings, "ret");
@@ -471,8 +503,8 @@ WinMainCRTStartup
     {
         fn_s64_to_s64 some_number = (fn_s64_to_s64)buffer_functions.end;
         
-        assemble(&buffer_functions, inst(&mov, rax, rcx, MOD_Registers));
-        assemble(&buffer_functions, inst(&ret, no_operand, no_operand, MOD_Registers));
+        assemble(&buffer_functions, inst(&mov, rax, rcx));
+        assemble(&buffer_functions, inst(&ret, no_operand, no_operand));
         
         s64 result = some_number(42);
         Assert(result == 42);
@@ -483,9 +515,9 @@ WinMainCRTStartup
         
         Operand imm64 = oper(Operand_Type_Immediate, 0, 42, Size_64);
         
-        assemble(&buffer_functions, inst(&mov, rax, imm64, MOD_Registers));
-        assemble(&buffer_functions, inst(&mov, rcx, imm64, MOD_Registers));
-        assemble(&buffer_functions, inst(&ret, no_operand, no_operand, MOD_Registers));
+        assemble(&buffer_functions, inst(&mov, rax, imm64));
+        assemble(&buffer_functions, inst(&mov, rcx, imm64));
+        assemble(&buffer_functions, inst(&ret, no_operand, no_operand));
         
         s64 result = the_answer();
         Assert(result == 42);
@@ -495,10 +527,11 @@ WinMainCRTStartup
         fn_s64_to_void write_to_pointer  = (fn_s64_to_void)buffer_functions.end;
         
         Operand imm64 = oper(Operand_Type_Immediate, 0, 42, Size_64);
+        Operand pointer_rcx = oper(Operand_Type_Memory, rcx.reg, 0, Size_64);
         
-        assemble(&buffer_functions, inst(&mov, rax, imm64, MOD_Registers));
-        assemble(&buffer_functions, inst(&mov, rcx, rax, MOD_Pointer));
-        assemble(&buffer_functions, inst(&ret, no_operand, no_operand, MOD_Registers));
+        assemble(&buffer_functions, inst(&mov, rax, imm64));
+        assemble(&buffer_functions, inst(&mov, pointer_rcx, rax));
+        assemble(&buffer_functions, inst(&ret, no_operand, no_operand));
         
         write_to_pointer((s64)buffer_junk.memory);
         Assert(*(s64 *)buffer_junk.memory == 42);
@@ -509,9 +542,11 @@ WinMainCRTStartup
         
         Operand imm8 = oper(Operand_Type_Immediate, 0, 1, Size_8);
         
-        assemble(&buffer_functions, inst(&sub, rcx, imm8, MOD_Registers));
-        assemble(&buffer_functions, inst(&mov, rax, rcx, MOD_Registers));
-        assemble(&buffer_functions, inst(&ret, no_operand, no_operand, MOD_Registers));
+        assemble(&buffer_functions, inst(&sub, rcx, imm8));
+        assemble(&buffer_functions, inst(&mov, r8, rcx));
+        assemble(&buffer_functions, inst(&add, r8, imm8));
+        assemble(&buffer_functions, inst(&mov, rax, rcx));
+        assemble(&buffer_functions, inst(&ret, no_operand, no_operand));
         
         s64 result = not_the_answer(42);
         Assert(result == 41);
