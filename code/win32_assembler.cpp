@@ -7,11 +7,11 @@ global u32 PAGE;
 
 enum REX
 {
-    Rex_Byte = 0b01000000,
-    Rex_W = 0b00001000,
-    Rex_R = 0b00000100,
-    Rex_X = 0b00000010,
-    Rex_B = 0b00000001
+    Rex_Empty = 0b01000000,
+    Rex_W = 0b01001000,
+    Rex_R = 0b01000100,
+    Rex_X = 0b01000010,
+    Rex_B = 0b01000001
 };
 
 enum MOD
@@ -165,12 +165,10 @@ add_opcode
     }
 }
 
-// TODO: I need to add a global dynamic list of operations that each have a string and a pointer to the matching opcode list, so I can search for the string and get pointed to the right list of opcodes.
-
 struct Opcode_Name
 {
     String name;
-    Opcode_List *opcodes;
+    Opcode_List *opcode;
 };
 
 struct Opcode_Name_Table
@@ -179,18 +177,16 @@ struct Opcode_Name_Table
     u32 count;
 };
 
-global Opcode_Name_Table name_table;
-
 void
 add_opcode_list
-(Buffer *buffer, Opcode_List *list, String name)
+(Buffer *buffer, Opcode_Name_Table *name_table, String name, Opcode_List *list)
 {
     Opcode_Name *opcode_name = (Opcode_Name *)buffer_allocate(buffer, sizeof(Opcode_Name));
     
     opcode_name->name = name;
-    opcode_name->opcodes = list;
+    opcode_name->opcode = list;
     
-    name_table.count++;
+    name_table->count++;
 }
 
 struct Instruction
@@ -268,7 +264,7 @@ assemble
                 reg_mem = (u8)(instruction.operands[mem_index].reg & 0b0111);
                 if((instruction.operands[mem_index].reg & 0b1000) != 0)
                 {
-                    rex_byte = (u8)(rex_byte | Rex_Byte | Rex_B);
+                    rex_byte = (u8)(rex_byte | Rex_B);
                 }
             }
             
@@ -278,7 +274,7 @@ assemble
                 reg_opcode = (u8)(instruction.operands[reg_index].reg & 0b0111);
                 if((instruction.operands[reg_index].reg & 0b1000) != 0)
                 {
-                    rex_byte = (u8)(rex_byte | Rex_Byte | Rex_R);
+                    rex_byte = (u8)(rex_byte | Rex_R);
                 }
             }
         }
@@ -290,7 +286,7 @@ assemble
         reg_mem = (u8)(instruction.operands[0].reg & 0b0111);
         if((instruction.operands[0].reg & 0b1000) != 0)
         {
-            rex_byte = (u8)(rex_byte | Rex_Byte | Rex_B);
+            rex_byte = (u8)(rex_byte | Rex_B);
         }
     }
     else if(operation->type == Opcode_Type_Plus_Register)
@@ -356,20 +352,100 @@ assemble
     }
 }
 
-void
-parse_instruction
-(Buffer *buffer)
+enum Letter_Type
+{
+    Letter_Type_None,
+    Letter_Type_AlphaNumeric,
+    Letter_Type_Symbol
+};
+
+Instruction
+parse_line
+(Opcode_Name_Table *name_table, String line)
 {
     
     Instruction result = {};
     
-    String line = create_string(buffer, "mov rax, rcx");
-    u32 ch = scan_string(line, ' ');
-    Assert(ch != 0);
+#define MAX_WORDS 8
+    String split[MAX_WORDS] = {};
+    u32 word = 0;
+    Letter_Type letter_type = Letter_Type_None;
+    for(u32 i = 0; i < line.len; i++)
+    {
+        
+        Letter_Type prev_letter_type = letter_type;
+        
+        if((line.chars[i] >= '0') && (line.chars[i] <= '9') ||
+           (line.chars[i] >= 'A') && (line.chars[i] <= 'Z') ||
+           (line.chars[i] >= 'a') && (line.chars[i] <= 'z'))
+        {
+            letter_type = Letter_Type_AlphaNumeric;
+        }
+        else if(line.chars[i] == ' ')
+        {
+            letter_type = Letter_Type_None;
+            continue;
+        }
+        else
+        {
+            letter_type = Letter_Type_Symbol;
+        }
+        
+        if(letter_type != Letter_Type_None)
+        {
+            
+            if(prev_letter_type != letter_type)
+            {            
+                if(split[word].len != 0)
+                {
+                    
+                    word++;
+                    Assert(word < MAX_WORDS);
+                }
+                split[word].chars = &line.chars[i];
+            }
+            split[word].len++;
+        }
+    }
     
-    String operation = {};
-    operation.chars = line.chars;
-    operation.len = ch - 1;
+    for(word = 0; split[word].len != 0; word++)
+    {
+        for(u32 i = 0; i < name_table->count; i++)
+        {
+            Opcode_Name *entry = &name_table->start[i];
+            if(entry->name.len == split[word].len)
+            {
+                
+                b32 match = 1;
+                for(u32 ch = 0; ch < split[word].len; ch++)
+                {
+                    if(entry->name.chars[ch] != split[word].chars[ch])
+                    {
+                        match = 0;
+                        break;
+                    }
+                }
+                
+                if(match != 0)
+                {
+                    result.opcode = entry->opcode;
+                    break;
+                }
+            }
+        }
+        
+        if(result.opcode != 0)
+        {
+            break;
+        }
+    }
+    
+    if(result.opcode == 0)
+    {
+        Assert(!"No opcode found.");
+    }
+    
+    return(result);
 }
 
 int __stdcall
@@ -425,53 +501,54 @@ WinMainCRTStartup
     
     Buffer buffer_opcode_table = create_buffer(PAGE, PAGE_READWRITE);
     Buffer buffer_opcode_name_table = create_buffer(PAGE, PAGE_READWRITE);
+    Opcode_Name_Table name_table = {};
     name_table.start = (Opcode_Name *)buffer_opcode_name_table.memory;
     
     Opcode_List mov = {};
-    String name = create_string(&buffer_strings, "mov");
-    add_opcode_list(&buffer_opcode_name_table, &mov, name);
+    String name = create_string(&buffer_strings, "->");
+    add_opcode_list(&buffer_opcode_name_table, &name_table, name, &mov);
     
     add_opcode(&buffer_opcode_table, &mov, 0x88, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_8, Size_8, true, false, Reg_Effect_Nothing, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x88, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_8, Size_8, true, false, Reg_Effect_Nothing, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_32, Size_32, true, false, Reg_Effect_Zero_Extends, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_32, Size_32, true, false, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_64, Size_64, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
-    add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_64, Size_64, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_64, Size_64, true, false, Reg_Effect_Zero_Extends, Rex_W);
+    add_opcode(&buffer_opcode_table, &mov, 0x89, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_64, Size_64, true, false, Reg_Effect_Zero_Extends, Rex_W);
     add_opcode(&buffer_opcode_table, &mov, 0x8a, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_8, Size_8, true, true, Reg_Effect_Nothing, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x8a, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Memory, Size_8, Size_8, true, true, Reg_Effect_Nothing, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_32, Size_32, true, true, Reg_Effect_Zero_Extends, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_32, Size_32, true, true, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_64, Size_64, true, true, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
-    add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_64, Size_64, true, true, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_64, Size_64, true, true, Reg_Effect_Zero_Extends, Rex_W);
+    add_opcode(&buffer_opcode_table, &mov, 0x8b, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_64, Size_64, true, true, Reg_Effect_Zero_Extends, Rex_W);
     add_opcode(&buffer_opcode_table, &mov, 0xb0, Opcode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_8, Size_8, false, false, Reg_Effect_Nothing, 0);
     add_opcode(&buffer_opcode_table, &mov, 0xb8, Opcode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_32, Size_32, false, false, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &mov, 0xb8, Opcode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_64, false, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &mov, 0xb8, Opcode_Type_Plus_Register, 0, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_64, false, false, Reg_Effect_Zero_Extends, Rex_W);
     add_opcode(&buffer_opcode_table, &mov, 0xc6, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_8, Size_8, true, false, Reg_Effect_Nothing, 0);
     add_opcode(&buffer_opcode_table, &mov, 0xc7, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_32, Size_32, true, false, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &mov, 0xc7, Opcode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_32, true, false, Reg_Effect_Sign_Extends, Rex_Byte | Rex_W);
-    add_opcode(&buffer_opcode_table, &mov, 0xc7, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_32, true, false, Reg_Effect_Sign_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &mov, 0xc7, Opcode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_32, true, false, Reg_Effect_Sign_Extends, Rex_W);
+    add_opcode(&buffer_opcode_table, &mov, 0xc7, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_32, true, false, Reg_Effect_Sign_Extends, Rex_W);
     
     Opcode_List add = {};
     name = create_string(&buffer_strings, "add");
-    add_opcode_list(&buffer_opcode_name_table, &add, name);
+    add_opcode_list(&buffer_opcode_name_table, &name_table, name, &add);
     
     add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
     add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
-    add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_W);
+    add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_W);
     
     Opcode_List sub = {};
     name = create_string(&buffer_strings, "sub");
-    add_opcode_list(&buffer_opcode_name_table, &sub, name);
+    add_opcode_list(&buffer_opcode_name_table, &name_table, name, &sub);
     
     add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Register, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
     add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Memory, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
-    add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
-    add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_Byte | Rex_W);
+    add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Register, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_W);
+    add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Memory, Operand_Type_Immediate, Size_64, Size_8, true, false, Reg_Effect_Zero_Extends, Rex_W);
     
     Opcode_List ret = {};
     name = create_string(&buffer_strings, "ret");
-    add_opcode_list(&buffer_opcode_name_table, &ret, name);
+    add_opcode_list(&buffer_opcode_name_table, &name_table, name, &ret);
     
     add_opcode(&buffer_opcode_table, &ret, 0xc3, Opcode_Type_Regular, 0, Operand_Type_None, Operand_Type_None, Size_None, Size_None, false, false, Reg_Effect_Nothing, 0);
     
@@ -552,7 +629,8 @@ WinMainCRTStartup
         Assert(result == 41);
     }
     
-    parse_instruction(&buffer_strings);
+    String line = create_string(&buffer_strings, "rcx->rax");
+    parse_line(&name_table, line);
     
     ExitProcess(0);
 }
