@@ -118,6 +118,24 @@ scan_string
     return(result);
 }
 
+b32
+check_if_number
+(String string)
+{
+    b32 result = 1;
+    
+    for(u32 ch = 0; ch < string.len; ch++)
+    {
+        if((string.chars[ch] < '0') || (string.chars[ch] > '9'))
+        {
+            result = 0;
+            break;
+        }
+    }
+    
+    return(result);
+}
+
 typedef s64 (*fn_s64_to_s64)(s64);
 typedef s64 (*fn_void_to_s64)();
 typedef s32 (*fn_void_to_s32)();

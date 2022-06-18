@@ -47,42 +47,6 @@ struct Operand
     Size size;
 };
 
-global Operand no_operand;
-
-global Operand rax;
-global Operand rcx;
-global Operand rdx;
-global Operand rbx;
-global Operand rsp;
-global Operand rbp;
-global Operand rsi;
-global Operand rdi;
-global Operand r8;
-global Operand r9;
-global Operand r10;
-global Operand r11;
-global Operand r12;
-global Operand r13;
-global Operand r14;
-global Operand r15;
-
-global Operand eax;
-global Operand ecx;
-global Operand edx;
-global Operand ebx;
-global Operand esp;
-global Operand ebp;
-global Operand esi;
-global Operand edi;
-global Operand r8d;
-global Operand r9d;
-global Operand r10d;
-global Operand r11d;
-global Operand r12d;
-global Operand r13d;
-global Operand r14d;
-global Operand r15d;
-
 Operand
 oper
 (Operand_Type type, u8 reg, u64 imm, Size size)
@@ -94,6 +58,31 @@ oper
     result.imm = imm;
     result.size = size;
     return(result);
+}
+
+struct Operand_Name
+{
+    String name;
+    Operand *operand;
+};
+
+struct Operand_Name_List
+{
+    Operand_Name *start;
+    u32 count;
+};
+
+void
+add_operand
+(Buffer *buffer, Operand_Name_List *list, String name, Operand *operand)
+{
+    
+    Operand_Name *entry = (Operand_Name *)buffer_allocate(buffer, sizeof(Operand_Name));
+    
+    entry->name = name;
+    entry->operand = operand;
+    
+    list->count++;
 }
 
 enum Opcode_Type
@@ -359,14 +348,51 @@ enum Letter_Type
     Letter_Type_Symbol
 };
 
+u32
+find_operand
+(Operand_Name_List *operand_table, String str)
+{
+    
+    u32 result = 0;
+    
+    for(u32 index = 0; index < operand_table->count; index++)
+    {
+        
+        Operand_Name *entry = &operand_table->start[index];
+        if(entry->name.len == str.len)
+        {
+            
+            b32 match = 1;
+            for(u32 ch = 0; ch < str.len; ch++)
+            {
+                if(entry->name.chars[ch] != str.chars[ch])
+                {
+                    match = 0;
+                    break;
+                }
+            }
+            
+            if(match == 1)
+            {
+                result = index;
+                break;
+            }
+            
+        }
+    }
+    
+    return(result);
+}
+
 Instruction
 parse_line
-(Opcode_Name_Table *name_table, String line)
+(Opcode_Name_Table *opcode_table, Operand_Name_List *operand_table, String line)
 {
     
     Instruction result = {};
     
 #define MAX_WORDS 8
+    // TODO: Oh no! Negative numbers won't split correctly.
     String split[MAX_WORDS] = {};
     u32 word = 0;
     Letter_Type letter_type = Letter_Type_None;
@@ -408,18 +434,19 @@ parse_line
         }
     }
     
-    for(word = 0; split[word].len != 0; word++)
+    u32 operation = 0;
+    for(operation = 0; split[operation].len != 0; operation++)
     {
-        for(u32 i = 0; i < name_table->count; i++)
+        for(u32 i = 0; i < opcode_table->count; i++)
         {
-            Opcode_Name *entry = &name_table->start[i];
-            if(entry->name.len == split[word].len)
+            Opcode_Name *entry = &opcode_table->start[i];
+            if(entry->name.len == split[operation].len)
             {
                 
                 b32 match = 1;
-                for(u32 ch = 0; ch < split[word].len; ch++)
+                for(u32 ch = 0; ch < split[operation].len; ch++)
                 {
-                    if(entry->name.chars[ch] != split[word].chars[ch])
+                    if(entry->name.chars[ch] != split[operation].chars[ch])
                     {
                         match = 0;
                         break;
@@ -445,6 +472,67 @@ parse_line
         Assert(!"No opcode found.");
     }
     
+    if(word > 0)
+    {    
+        u32 destination = 0;
+        for(u32 i = 0; split[i].len != 0; i++)
+        {
+            if(i != operation)
+            {
+                destination = i;
+                break;
+            }
+        }
+        
+        if(word > 1)
+        {        
+            u32 source = 0;
+            for(u32 i = 0; split[i].len != 0; i++)
+            {
+                if((i != operation) && (i != destination))
+                {
+                    source = i;
+                    break;
+                }
+            }
+            
+            if((split[operation].chars[0] == '-') && (split[operation].chars[1] == '>'))
+            {
+                u32 temp = destination;
+                destination = source;
+                source = temp;
+            }
+            
+            u32 source_index = find_operand(operand_table, split[source]);
+            if(source_index == 0)
+            {
+                b32 isNumber = check_if_number(split[source]);
+                if(isNumber != 0)
+                {
+                    
+                }
+                else
+                {
+                    Assert(!"Unknown operand.");
+                }
+            }
+            else
+            {
+                result.operands[1] = *(operand_table->start[source_index].operand);
+            }
+        }
+        
+        u32 destination_index = find_operand(operand_table, split[destination]);
+        if(destination_index == 0)
+        {
+            
+        }
+        else
+        {
+            result.operands[0] = *(operand_table->start[destination_index].operand);
+        }
+    }
+    
     return(result);
 }
 
@@ -465,48 +553,182 @@ WinMainCRTStartup
     Buffer buffer_junk = create_buffer(PAGE, PAGE_READWRITE);
     Buffer buffer_strings = create_buffer(PAGE, PAGE_READWRITE);
     
-    rax = oper(Operand_Type_Register, 0, 0, Size_64);
-    rcx = oper(Operand_Type_Register, 1, 0, Size_64);
-    rdx = oper(Operand_Type_Register, 2, 0, Size_64);
-    rbx = oper(Operand_Type_Register, 3, 0, Size_64);
-    rsp = oper(Operand_Type_Register, 4, 0, Size_64);
-    rbp = oper(Operand_Type_Register, 5, 0, Size_64);
-    rsi = oper(Operand_Type_Register, 6, 0, Size_64);
-    rdi = oper(Operand_Type_Register, 7, 0, Size_64);
-    r8  = oper(Operand_Type_Register, 8, 0, Size_64);
-    r9  = oper(Operand_Type_Register, 9, 0, Size_64);
-    r10 = oper(Operand_Type_Register, 10, 0, Size_64);
-    r11 = oper(Operand_Type_Register, 11, 0, Size_64);
-    r12 = oper(Operand_Type_Register, 12, 0, Size_64);
-    r13 = oper(Operand_Type_Register, 13, 0, Size_64);
-    r14 = oper(Operand_Type_Register, 14, 0, Size_64);
-    r15 = oper(Operand_Type_Register, 15, 0, Size_64);
+    Buffer buffer_operand_table = create_buffer(PAGE, PAGE_READWRITE);
+    Operand_Name_List operand_table = {};
+    operand_table.start = (Operand_Name *)buffer_operand_table.end;
     
+    Operand no_operand = {};
+    String name = {};
+    add_operand(&buffer_operand_table, &operand_table, name, &no_operand);
+    
+    Operand rax = {};
+    name = create_string(&buffer_strings, "rax");
+    rax = oper(Operand_Type_Register, 0, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &rax);
+    
+    Operand rcx = {};
+    name = create_string(&buffer_strings, "rcx");
+    rcx = oper(Operand_Type_Register, 1, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &rcx);
+    
+    Operand rdx = {};
+    name = create_string(&buffer_strings, "rdx");
+    rdx = oper(Operand_Type_Register, 2, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &rdx);
+    
+    Operand rbx = {};
+    name = create_string(&buffer_strings, "rbx");
+    rbx = oper(Operand_Type_Register, 3, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &rbx);
+    
+    Operand rsp = {};
+    name = create_string(&buffer_strings, "rsp");
+    rsp = oper(Operand_Type_Register, 4, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &rsp);
+    
+    Operand rbp = {};
+    name = create_string(&buffer_strings, "rbp");
+    rbp = oper(Operand_Type_Register, 5, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &rbp);
+    
+    Operand rsi = {};
+    name = create_string(&buffer_strings, "rsi");
+    rsi = oper(Operand_Type_Register, 6, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &rsi);
+    
+    Operand rdi = {};
+    name = create_string(&buffer_strings, "rdi");
+    rdi = oper(Operand_Type_Register, 7, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &rdi);
+    
+    Operand r8 = {};
+    name = create_string(&buffer_strings, "r8");
+    r8  = oper(Operand_Type_Register, 8, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &r8);
+    
+    Operand r9 = {};
+    name = create_string(&buffer_strings, "r9");
+    r9  = oper(Operand_Type_Register, 9, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &r9);
+    
+    Operand r10 = {};
+    name = create_string(&buffer_strings, "r10");
+    r10 = oper(Operand_Type_Register, 10, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &r10);
+    
+    Operand r11 = {};
+    name = create_string(&buffer_strings, "r11");
+    r11 = oper(Operand_Type_Register, 11, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &r11);
+    
+    Operand r12 = {};
+    name = create_string(&buffer_strings, "r12");
+    r12 = oper(Operand_Type_Register, 12, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &r12);
+    
+    Operand r13 = {};
+    name = create_string(&buffer_strings, "r13");
+    r13 = oper(Operand_Type_Register, 13, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &r13);
+    
+    Operand r14 = {};
+    name = create_string(&buffer_strings, "r14");
+    r14 = oper(Operand_Type_Register, 14, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &r14);
+    
+    Operand r15 = {};
+    name = create_string(&buffer_strings, "r15");
+    r15 = oper(Operand_Type_Register, 15, 0, Size_64);
+    add_operand(&buffer_operand_table, &operand_table, name, &r15);
+    
+    Operand eax = {};
+    name = create_string(&buffer_strings, "eax");
     eax  = oper(Operand_Type_Register, 0, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &eax);
+    
+    Operand ecx = {};
+    name = create_string(&buffer_strings, "ecx");
     ecx  = oper(Operand_Type_Register, 1, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &ecx);
+    
+    Operand edx = {};
+    name = create_string(&buffer_strings, "edx");
     edx  = oper(Operand_Type_Register, 2, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &edx);
+    
+    Operand ebx = {};
+    name = create_string(&buffer_strings, "ebx");
     ebx  = oper(Operand_Type_Register, 3, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &ebx);
+    
+    Operand esp = {};
+    name = create_string(&buffer_strings, "esp");
     esp  = oper(Operand_Type_Register, 4, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &esp);
+    
+    Operand ebp = {};
+    name = create_string(&buffer_strings, "ebp");
     ebp  = oper(Operand_Type_Register, 5, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &ebp);
+    
+    Operand esi = {};
+    name = create_string(&buffer_strings, "esi");
     esi  = oper(Operand_Type_Register, 6, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &esi);
+    
+    Operand edi = {};
+    name = create_string(&buffer_strings, "edi");
     edi  = oper(Operand_Type_Register, 7, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &edi);
+    
+    Operand r8d = {};
+    name = create_string(&buffer_strings, "r8d");
     r8d  = oper(Operand_Type_Register, 8, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &r8d);
+    
+    Operand r9d = {};
+    name = create_string(&buffer_strings, "r9d");
     r9d  = oper(Operand_Type_Register, 9, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &r9d);
+    
+    Operand r10d = {};
+    name = create_string(&buffer_strings, "r10d");
     r10d = oper(Operand_Type_Register, 10, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &r10d);
+    
+    Operand r11d = {};
+    name = create_string(&buffer_strings, "r11d");
     r11d = oper(Operand_Type_Register, 11, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &r11d);
+    
+    Operand r12d = {};
+    name = create_string(&buffer_strings, "r12d");
     r12d = oper(Operand_Type_Register, 12, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &r12d);
+    
+    Operand r13d = {};
+    name = create_string(&buffer_strings, "r13d");
     r13d = oper(Operand_Type_Register, 13, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &r13d);
+    
+    Operand r14d = {};
+    name = create_string(&buffer_strings, "r14d");
     r14d = oper(Operand_Type_Register, 14, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &r14d);
+    
+    Operand r15d = {};
+    name = create_string(&buffer_strings, "r15d");
     r15d = oper(Operand_Type_Register, 15, 0, Size_32);
+    add_operand(&buffer_operand_table, &operand_table, name, &r15d);
     
     Buffer buffer_opcode_table = create_buffer(PAGE, PAGE_READWRITE);
     Buffer buffer_opcode_name_table = create_buffer(PAGE, PAGE_READWRITE);
-    Opcode_Name_Table name_table = {};
-    name_table.start = (Opcode_Name *)buffer_opcode_name_table.memory;
+    Opcode_Name_Table opcode_name_table = {};
+    opcode_name_table.start = (Opcode_Name *)buffer_opcode_name_table.end;
     
     Opcode_List mov = {};
-    String name = create_string(&buffer_strings, "->");
-    add_opcode_list(&buffer_opcode_name_table, &name_table, name, &mov);
+    name = create_string(&buffer_strings, "->");
+    add_opcode_list(&buffer_opcode_name_table, &opcode_name_table, name, &mov);
     
     add_opcode(&buffer_opcode_table, &mov, 0x88, Opcode_Type_Regular, 0, Operand_Type_Register, Operand_Type_Register, Size_8, Size_8, true, false, Reg_Effect_Nothing, 0);
     add_opcode(&buffer_opcode_table, &mov, 0x88, Opcode_Type_Regular, 0, Operand_Type_Memory, Operand_Type_Register, Size_8, Size_8, true, false, Reg_Effect_Nothing, 0);
@@ -530,7 +752,7 @@ WinMainCRTStartup
     
     Opcode_List add = {};
     name = create_string(&buffer_strings, "add");
-    add_opcode_list(&buffer_opcode_name_table, &name_table, name, &add);
+    add_opcode_list(&buffer_opcode_name_table, &opcode_name_table, name, &add);
     
     add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Register, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
     add_opcode(&buffer_opcode_table, &add, 0x83, Opcode_Type_Extended, 0, Operand_Type_Memory, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
@@ -539,7 +761,7 @@ WinMainCRTStartup
     
     Opcode_List sub = {};
     name = create_string(&buffer_strings, "sub");
-    add_opcode_list(&buffer_opcode_name_table, &name_table, name, &sub);
+    add_opcode_list(&buffer_opcode_name_table, &opcode_name_table, name, &sub);
     
     add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Register, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
     add_opcode(&buffer_opcode_table, &sub, 0x83, Opcode_Type_Extended, 5, Operand_Type_Memory, Operand_Type_Immediate, Size_32, Size_8, true, false, Reg_Effect_Zero_Extends, 0);
@@ -548,7 +770,7 @@ WinMainCRTStartup
     
     Opcode_List ret = {};
     name = create_string(&buffer_strings, "ret");
-    add_opcode_list(&buffer_opcode_name_table, &name_table, name, &ret);
+    add_opcode_list(&buffer_opcode_name_table, &opcode_name_table, name, &ret);
     
     add_opcode(&buffer_opcode_table, &ret, 0xc3, Opcode_Type_Regular, 0, Operand_Type_None, Operand_Type_None, Size_None, Size_None, false, false, Reg_Effect_Nothing, 0);
     
@@ -580,8 +802,13 @@ WinMainCRTStartup
     {
         fn_s64_to_s64 some_number = (fn_s64_to_s64)buffer_functions.end;
         
-        assemble(&buffer_functions, inst(&mov, rax, rcx));
-        assemble(&buffer_functions, inst(&ret, no_operand, no_operand));
+        String line = create_string(&buffer_strings, "rcx->rax");
+        Instruction mov_rax_rcx = parse_line(&opcode_name_table, &operand_table, line);
+        assemble(&buffer_functions, mov_rax_rcx);
+        
+        line = create_string(&buffer_strings, "ret");
+        Instruction come_back = parse_line(&opcode_name_table, &operand_table, line);
+        assemble(&buffer_functions, come_back);
         
         s64 result = some_number(42);
         Assert(result == 42);
@@ -590,10 +817,12 @@ WinMainCRTStartup
     {
         fn_void_to_s32 the_answer = (fn_void_to_s32)buffer_functions.end;
         
+        String line = create_string(&buffer_strings, "42->rax");
+        Instruction mov_imm = parse_line(&opcode_name_table, &operand_table, line);
+        
         Operand imm64 = oper(Operand_Type_Immediate, 0, 42, Size_64);
         
         assemble(&buffer_functions, inst(&mov, rax, imm64));
-        assemble(&buffer_functions, inst(&mov, rcx, imm64));
         assemble(&buffer_functions, inst(&ret, no_operand, no_operand));
         
         s64 result = the_answer();
@@ -628,9 +857,6 @@ WinMainCRTStartup
         s64 result = not_the_answer(42);
         Assert(result == 41);
     }
-    
-    String line = create_string(&buffer_strings, "rcx->rax");
-    parse_line(&name_table, line);
     
     ExitProcess(0);
 }
