@@ -119,17 +119,79 @@ scan_string
 }
 
 b32
-check_if_number
+is_integer
 (String string)
 {
     b32 result = 1;
     
-    for(u32 ch = 0; ch < string.len; ch++)
+    u32 neg = 0;
+    if(string.chars[0] == '-')
+    {
+        neg = 1;
+    }
+    
+    for(u32 ch = neg; ch < string.len; ch++)
     {
         if((string.chars[ch] < '0') || (string.chars[ch] > '9'))
         {
             result = 0;
             break;
+        }
+    }
+    
+    return(result);
+}
+
+s64
+StringToS64
+(String string)
+{
+    s64 Result = 0;
+    
+    u32 neg = 0;
+    if(string.chars[0] == '-')
+    {
+        neg = 1;
+    }
+    
+    for(u64 i = neg; i < string.len; i++)
+    {
+        Result = Result + (string.chars[i] - '0');
+        
+        if(i != (string.len - 1))
+        {
+            Result = Result * 10;
+        }
+    }
+    
+    if(neg != 0)
+    {
+        Result = Result * -1;
+    }
+    
+    return(Result);
+}
+
+b32
+is_hexidecimal
+(String string)
+{
+    
+    b32 result = 0;
+    
+    if((string.len >= 3) && (string.chars[0] == '0') && ((string.chars[1] == 'x') || (string.chars[1] == 'X')))
+    {
+        result = 1;
+        u8 ch = 0;
+        for(u32 i = 2; i < string.len; i++)
+        {
+            ch = string.chars[i];
+            
+            if(((ch < '0') || (ch > '9')) && ((ch < 'a') || (ch > 'f')) && ((ch < 'A') || (ch > 'F')))
+            {
+                result = 0;
+                break;
+            }
         }
     }
     

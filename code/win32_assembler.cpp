@@ -392,7 +392,7 @@ parse_line
     Instruction result = {};
     
 #define MAX_WORDS 8
-    // TODO: Oh no! Negative numbers won't split correctly.
+    
     String split[MAX_WORDS] = {};
     u32 word = 0;
     Letter_Type letter_type = Letter_Type_None;
@@ -428,7 +428,25 @@ parse_line
                     word++;
                     Assert(word < MAX_WORDS);
                 }
-                split[word].chars = &line.chars[i];
+                
+                // Possible solution to negative number splitting
+                if((i > 0) && (line.chars[i] >= '0') && (line.chars[i] <= '9') && (line.chars[i-1] == '-'))
+                {
+                    if(i == 1)
+                    {
+                        word--;
+                    }
+                    else
+                    {
+                        split[word-1].len--;
+                        split[word].chars = &line.chars[i-1];
+                        split[word].len++;
+                    }
+                }
+                else
+                {
+                    split[word].chars = &line.chars[i];
+                }
             }
             split[word].len++;
         }
@@ -506,14 +524,67 @@ parse_line
             u32 source_index = find_operand(operand_table, split[source]);
             if(source_index == 0)
             {
-                b32 isNumber = check_if_number(split[source]);
-                if(isNumber != 0)
+                b32 isInteger = is_integer(split[source]);
+                if(isInteger != 0)
                 {
+                    s64 number = StringToS64(split[source]);
+                    (void)number;
                     
+                    // TODO: turn number into Operand
                 }
                 else
                 {
-                    Assert(!"Unknown operand.");
+                    b32 isHexidecimal = is_hexidecimal(split[source]);
+                    if(isHexidecimal != 0)
+                    {
+                        
+                        u64 number = 0;
+                        for(u32 i = 2; i < split[source].len; i++)
+                        {
+                            u8 ch = split[source].chars[i];
+                            
+                            if((ch >= 'A') && (ch <= 'F'))
+                            {
+                                number += (ch - 'A') + 10;
+                            }
+                            else if((ch >= 'a') && (ch <= 'f'))
+                            {
+                                number += (ch - 'a') + 10;
+                            }
+                            else if((ch >= '0') && (ch <= '9'))
+                            {
+                                number += ch - '0';
+                            }
+                            
+                            if(i < (split[source].len - 1))
+                            {
+                                number = number << 4;
+                            }
+                        }
+                        
+                        u32 len = split[source].len - 2;
+                        
+                        if(len <= (Size_8 *2))
+                        {
+                            result.operands[1] = oper(Operand_Type_Immediate, 0, number, Size_8);
+                        }
+                        else if(len <= (Size_16 *2))
+                        {
+                            result.operands[1] = oper(Operand_Type_Immediate, 0, number, Size_16);
+                        }
+                        else if(len <= (Size_32 *2))
+                        {
+                            result.operands[1] = oper(Operand_Type_Immediate, 0, number, Size_32);
+                        }
+                        else if(len <= (Size_64 *2))
+                        {
+                            result.operands[1] = oper(Operand_Type_Immediate, 0, number, Size_64);
+                        }
+                    }
+                    else
+                    {
+                        Assert(!"Unknown operand.");
+                    }
                 }
             }
             else
@@ -525,13 +596,14 @@ parse_line
         u32 destination_index = find_operand(operand_table, split[destination]);
         if(destination_index == 0)
         {
-            
+            // Variables not supported for now.
+            Assert(!"Unsupported operand");
         }
         else
         {
             result.operands[0] = *(operand_table->start[destination_index].operand);
         }
-    }
+    }
     
     return(result);
 }
