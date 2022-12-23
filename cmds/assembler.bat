@@ -1,4 +1,4 @@
-rem @echo off
+@echo off
 
 cd d:\programming\github\assembler\assembler
 
