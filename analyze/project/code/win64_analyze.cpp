@@ -139,6 +139,20 @@ struct win64_file_header
 	image_section_header *SectionHeader;
 };
 
+#pragma pack(push, 1)
+struct debug_directory
+{
+	u32 characteristics;
+	u32 timeStamp;
+	u16 majorVersion;
+	u16 minorVersion;
+	u32 type;
+	u32 sizeOfData;
+	u32 addressOfRawData;
+	u32 pointerToRawData;
+};
+#pragma pack(pop)
+
 int __stdcall
 WinMainCRTStartup
 (void)
@@ -174,7 +188,11 @@ WinMainCRTStartup
 	header.COFFExtension = (coff_extension *)EndPEOptHeader;
 	header.dataDirectory = (data_directory *)((u8 *)header.COFFExtension + sizeof(coff_extension));
 	
-	// TODO: Section header comes right after PE Optional Header and the docs recommends using the sizeOfOptionalHeader in the COFFHeader structure to find it.
+	header.SectionHeader = (image_section_header *)((u8 *)header.PEOptHeader + header.COFFHeader->sizeOfOptionalHeader);
+	
+	// NOTE: I just happen to know that this is in the .rdata section from its virtual address being 0x2000 in its directory entry which is where the .rdata section would be loaded when the loader gets the .exe ready to run.
+	debug_directory *debug = (debug_directory *)((u8 *)Executable.Contents + header.SectionHeader[1].PointerToRawData);
+	(void)debug;
 	
 	return(0);
 }
