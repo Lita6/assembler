@@ -4,6 +4,23 @@
 
 global u32 PAGE;
 
+#define EXPORT        0
+#define IMPORT        1
+#define RESOURCE      2
+#define EXCEPTION     3
+#define CERTIFICATE   4
+#define BASE_RELOC    5
+#define DEBUG         6
+#define ARCHITECTURE  7
+#define GLOBAL_PTR    8
+#define TLS           9
+#define LOAD_CONFIG  10
+#define BOUND        11
+#define IAT          12
+#define DELAY_IMPORT 13
+#define CLR_RUNTIME  14
+#define RESERVED     15
+
 struct ILT_Entry_64bit
 {
 	union{
@@ -19,6 +36,17 @@ struct Base_Reloc_Entry
 	u16 offset : 12;
 	u16 type : 4;
 };
+
+#pragma pack(push, 1)
+struct import_directory_table
+{
+	u32 ILT_RVA;
+	u32 timeStamp;
+	u32 forwarderChain;
+	u32 nameRVA;
+	u32 IAT_RVA;
+};
+#pragma pack(pop)
 
 #pragma pack(push, 1)
 struct data_directory
@@ -153,6 +181,37 @@ struct debug_directory
 };
 #pragma pack(pop)
 
+image_section_header *
+GetSection
+(image_section_header *Sections, u32 SectionCount, u32 SectionAlignment, u32 VirtualAddress)
+{
+	image_section_header *result = 0;
+	for(u32 i = 0; i < SectionCount; i++)
+	{
+		u32 MinAddress = Sections[i].VirtualAddress;
+		u32 MaxAddress = Sections[i].VirtualAddress + SectionAlignment;
+		
+		if((VirtualAddress >= MinAddress) && (VirtualAddress < MaxAddress))
+		{
+			result = &Sections[i];
+			break;
+		}
+		
+	}
+	return(result);
+}
+
+u32
+GetFileAddress
+(image_section_header *Sections, u32 SectionCount, u32 SectionAlignment, u32 DataRVA)
+{
+	u32 result = 0;
+	image_section_header *Section = GetSection(Sections, SectionCount, SectionAlignment, DataRVA);
+	u32 diff = DataRVA - Section->VirtualAddress;
+	result = diff + Section->PointerToRawData;
+	return(result);
+}
+
 int __stdcall
 WinMainCRTStartup
 (void)
@@ -168,6 +227,14 @@ WinMainCRTStartup
 	String Hexadecimals = create_string(&Strings, "0123456789ABCDEF");
 	
 	read_file_result Executable = Win64ReadEntireFile("D:\\Programming\\GitHub\\assembler\\HMH\\build\\win64_handmade.exe");
+	DWORD OldProtect = 0;
+	s32 ChangedProtection = VirtualProtect(Executable.Contents, Executable.ContentsSize, PAGE_READONLY, &OldProtect);
+	if(ChangedProtection == 0)
+	{
+		u32 ErrorCode = GetLastError();
+		Assert(!"Failed to change executable protection.");
+		(void)ErrorCode;
+	}
 	
 	win64_file_header header = {};
 	header.DOSHeader = (dos_header *)Executable.Contents;
@@ -188,11 +255,68 @@ WinMainCRTStartup
 	header.COFFExtension = (coff_extension *)EndPEOptHeader;
 	header.dataDirectory = (data_directory *)((u8 *)header.COFFExtension + sizeof(coff_extension));
 	
+	data_directory *Export_Data = &header.dataDirectory[EXPORT];
+	(void)Export_Data;
+	data_directory *Import_Data = &header.dataDirectory[IMPORT];
+	(void)Import_Data;
+	data_directory *Resource_Data = &header.dataDirectory[RESOURCE];
+	(void)Resource_Data;
+	data_directory *Exception_Data = &header.dataDirectory[EXCEPTION];
+	(void)Exception_Data;
+	data_directory *Certificate_Data = &header.dataDirectory[CERTIFICATE];
+	(void)Certificate_Data;
+	data_directory *Base_Reloc_Data = &header.dataDirectory[BASE_RELOC];
+	(void)Base_Reloc_Data;
+	data_directory *Debug_Data = &header.dataDirectory[DEBUG];
+	(void)Debug_Data;
+	data_directory *Architecture_Data = &header.dataDirectory[ARCHITECTURE];
+	(void)Architecture_Data;
+	data_directory *Global_Ptr_Data = &header.dataDirectory[GLOBAL_PTR];
+	(void)Global_Ptr_Data;
+	data_directory *TLS_Data = &header.dataDirectory[TLS];
+	(void)TLS_Data;
+	data_directory *Load_Config_Data = &header.dataDirectory[LOAD_CONFIG];
+	(void)Load_Config_Data;
+	data_directory *Bound_Data = &header.dataDirectory[BOUND];
+	(void)Bound_Data;
+	data_directory *IAT_Data = &header.dataDirectory[IAT];
+	(void)IAT_Data;
+	data_directory *Delay_Import_Data = &header.dataDirectory[DELAY_IMPORT];
+	(void)Delay_Import_Data;
+	data_directory *CLR_Runtime_Data = &header.dataDirectory[CLR_RUNTIME];
+	(void)CLR_Runtime_Data;
+	data_directory *Reserved_Data = &header.dataDirectory[RESERVED];
+	(void)Reserved_Data;
+	
 	header.SectionHeader = (image_section_header *)((u8 *)header.PEOptHeader + header.COFFHeader->sizeOfOptionalHeader);
 	
-	// NOTE: I just happen to know that this is in the .rdata section from its virtual address being 0x2000 in its directory entry which is where the .rdata section would be loaded when the loader gets the .exe ready to run.
-	debug_directory *debug = (debug_directory *)((u8 *)Executable.Contents + header.SectionHeader[1].PointerToRawData);
+	u32 debugAddress = GetFileAddress(header.SectionHeader, header.COFFHeader->numberOfSections, header.COFFExtension->SectionAlignment, Debug_Data->VirtualAddress);
+	u32 importAddress = GetFileAddress(header.SectionHeader, header.COFFHeader->numberOfSections, header.COFFExtension->SectionAlignment, Import_Data->VirtualAddress);
+	
+	debug_directory *debug = (debug_directory *)((u8 *)Executable.Contents + debugAddress);
 	(void)debug;
+	u32 debugEntries = Debug_Data->Size/sizeof(debug_directory);
+	(void)debugEntries;
+	
+	import_directory_table *IDT = (import_directory_table *)((u8 *)Executable.Contents + importAddress);
+	
+	u32 IDTCount = 0;
+	{ // NOTE: I don't want current to be useable anywhere else.
+		import_directory_table *current = IDT;
+		while(TRUE)
+		{
+			
+			if(IsMemZero((u8 *)current, sizeof(import_directory_table)))
+			{
+				break;
+			}
+			
+			current++;
+			IDTCount++;
+		}
+	}
+	
+	
 	
 	return(0);
 }

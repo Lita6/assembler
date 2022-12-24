@@ -242,4 +242,21 @@ ConvertNumToHex
 	return(MAX_U8);
 }
 
+b32
+IsMemZero
+(u8 *memory, u32 size)
+{
+	b32 result = TRUE;
+	for(u32 i = 0; i < size; i++)
+	{
+		if(memory[i] != 0)
+		{
+			result = FALSE;
+			break;
+		}
+	}
+	
+	return(result);
+}
+
 #endif //WIN64_ANALYZE_H
