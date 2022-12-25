@@ -21,16 +21,6 @@ global u32 PAGE;
 #define CLR_RUNTIME  14
 #define RESERVED     15
 
-struct ILT_Entry_64bit
-{
-	union{
-		u32 ordinal : 16;
-		u32 hint_name : 32;
-	};
-	
-	u32 ordinal_name_flag : 1;
-};
-
 struct Base_Reloc_Entry
 {
 	u16 offset : 12;
@@ -47,6 +37,33 @@ struct import_directory_table
 	u32 IAT_RVA;
 };
 #pragma pack(pop)
+
+struct extracted_ILT
+{
+	u16 ordinal;
+	u16 *hint;
+	String functionName;
+};
+
+struct ILT_entry
+{
+	u64 *data;
+	extracted_ILT *entry;
+	u32 count;
+};
+
+struct IDT_entry
+{
+	String name;
+	ILT_entry ILT;
+};
+
+struct extracted_IDT
+{
+	import_directory_table *IDT;
+	IDT_entry *entries;
+	u32 IDTCount;
+};
 
 #pragma pack(push, 1)
 struct data_directory
@@ -206,9 +223,14 @@ GetFileAddress
 (image_section_header *Sections, u32 SectionCount, u32 SectionAlignment, u32 DataRVA)
 {
 	u32 result = 0;
+	
 	image_section_header *Section = GetSection(Sections, SectionCount, SectionAlignment, DataRVA);
-	u32 diff = DataRVA - Section->VirtualAddress;
-	result = diff + Section->PointerToRawData;
+	if(Section != 0)
+	{
+		u32 diff = DataRVA - Section->VirtualAddress;
+		result = diff + Section->PointerToRawData;
+	}
+	
 	return(result);
 }
 
@@ -223,6 +245,8 @@ WinMainCRTStartup
 	PAGE = SysInfo.dwPageSize;
 	
 	Buffer Strings = win64_make_buffer(PAGE, PAGE_READWRITE);
+	Buffer Buffer_IDT  = win64_make_buffer(PAGE, PAGE_READWRITE);
+	Buffer Buffer_ILT  = win64_make_buffer(PAGE, PAGE_READWRITE);
 	
 	String Hexadecimals = create_string(&Strings, "0123456789ABCDEF");
 	
@@ -291,32 +315,78 @@ WinMainCRTStartup
 	header.SectionHeader = (image_section_header *)((u8 *)header.PEOptHeader + header.COFFHeader->sizeOfOptionalHeader);
 	
 	u32 debugAddress = GetFileAddress(header.SectionHeader, header.COFFHeader->numberOfSections, header.COFFExtension->SectionAlignment, Debug_Data->VirtualAddress);
+	debug_directory *debug = 0;
+	u32 debugEntries = 0;
+	if(debugAddress != 0)
+	{	
+		debug = (debug_directory *)((u8 *)Executable.Contents + debugAddress);
+		debugEntries = Debug_Data->Size/sizeof(debug_directory);
+	}
+	
 	u32 importAddress = GetFileAddress(header.SectionHeader, header.COFFHeader->numberOfSections, header.COFFExtension->SectionAlignment, Import_Data->VirtualAddress);
-	
-	debug_directory *debug = (debug_directory *)((u8 *)Executable.Contents + debugAddress);
-	(void)debug;
-	u32 debugEntries = Debug_Data->Size/sizeof(debug_directory);
-	(void)debugEntries;
-	
-	import_directory_table *IDT = (import_directory_table *)((u8 *)Executable.Contents + importAddress);
-	
-	u32 IDTCount = 0;
-	{ // NOTE: I don't want current to be useable anywhere else.
-		import_directory_table *current = IDT;
+	extracted_IDT ImportTable = {};
+	if(importAddress != 0)
+	{
+		ImportTable.IDT = (import_directory_table *)((u8 *)Executable.Contents + importAddress);
+		ImportTable.entries = (IDT_entry *)buffer_allocate(&Buffer_IDT, sizeof(IDT_entry));
+		
+		import_directory_table *current = ImportTable.IDT;
 		while(TRUE)
 		{
-			
 			if(IsMemZero((u8 *)current, sizeof(import_directory_table)))
 			{
+				Buffer_IDT.end -= sizeof(IDT_entry); // NOTE: Deallocate unused memory in buffer.
 				break;
 			}
 			
+			u32 nameAddress = GetFileAddress(header.SectionHeader, header.COFFHeader->numberOfSections, header.COFFExtension->SectionAlignment, current->nameRVA);
+			ImportTable.entries[ImportTable.IDTCount].name.chars = (u8 *)Executable.Contents + nameAddress;
+			ImportTable.entries[ImportTable.IDTCount].name.len = GetStringLength(ImportTable.entries[ImportTable.IDTCount].name.chars);
+			u32 ILTAddress = GetFileAddress(header.SectionHeader, header.COFFHeader->numberOfSections, header.COFFExtension->SectionAlignment, current->ILT_RVA);
+			ImportTable.entries[ImportTable.IDTCount].ILT.data = (u64 *)((u8 *)Executable.Contents + ILTAddress);
+			
+			ILT_entry *iltEntry = &ImportTable.entries[ImportTable.IDTCount].ILT;
+			u64 *data = ImportTable.entries[ImportTable.IDTCount].ILT.data;
+			iltEntry->entry = (extracted_ILT *)(buffer_allocate(&Buffer_ILT, sizeof(extracted_ILT)));
+			extracted_ILT *currentILT = iltEntry->entry;
+			while(TRUE)
+			{
+				
+				if(*data == 0)
+				{
+					// NOTE: Deallocate unused memory in buffer.
+					Buffer_ILT.end -= sizeof(extracted_ILT);
+					break;
+				}
+				
+				u64 bitmask = (u64)1<<63;
+				b32 IsOrdinal = ((*data) & bitmask) > 0;
+				if(IsOrdinal == FALSE)
+				{
+					
+					u32 hintAddress = GetFileAddress(header.SectionHeader, header.COFFHeader->numberOfSections, header.COFFExtension->SectionAlignment, (u32)(*data));
+					currentILT->hint = (u16 *)((u8 *)Executable.Contents + hintAddress);
+					currentILT->functionName.chars = (u8 *)(currentILT->hint + 1);
+					currentILT->functionName.len = GetStringLength(currentILT->functionName.chars);
+					
+				}
+				else
+				{
+					
+					currentILT->ordinal = (u16)(*data);
+				}
+				
+				iltEntry->count++;
+				data++;
+				currentILT = (extracted_ILT *)buffer_allocate(&Buffer_ILT, sizeof(extracted_ILT));
+			}
+			
 			current++;
-			IDTCount++;
+			ImportTable.IDTCount++;
+			buffer_allocate(&Buffer_IDT, sizeof(IDT_entry));
+			
 		}
 	}
-	
-	
 	
 	return(0);
 }

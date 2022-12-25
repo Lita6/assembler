@@ -222,6 +222,20 @@ create_string
 	return(result);
 }
 
+u32
+GetStringLength
+(u8 *chars)
+{
+	u32 result = 0;
+	
+	while(*chars++ != 0)
+	{
+		result++;
+	}
+	
+	return(result);
+}
+
 u8
 ConvertNumToHex
 (char letter, String Hexadecimals)

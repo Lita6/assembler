@@ -4,8 +4,6 @@ int __stdcall
 WinMainCRTStartup
 (void)
 {
-	
-	//OutputDebugStringA("This is the first thing we have printed.\n");
-	
+	u64 a = 0;
 	return(0);
 }
