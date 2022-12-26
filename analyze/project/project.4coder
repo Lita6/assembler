@@ -1,5 +1,5 @@
 version(2);
-project_name = "win64_art.exe";
+project_name = "win64_analyze.exe";
 patterns = {
 "*.c",
 "*.cpp",
