@@ -33,11 +33,22 @@ WinMainCRTStartup
 	}
 	
 	{
+		String src = create_string(&file, "155 -> eax\r\nret");
+		assemble(&byte_code, src);
+		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
+		u32 result = test();
+		Assert(result == 155);
+		
+		clear_buffer(&file);
+		clear_buffer(&byte_code);
+	}
+	
+	{
 		String src = create_string(&file, "0 -> eax\r\nret");
 		assemble(&byte_code, src);
-		fn_void_to_void test = (fn_void_to_void)byte_code.memory;
-		test();
-		Assert(*byte_code.memory == 0xc3);
+		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
+		u32 result = test();
+		Assert(result == 0);
 		
 		clear_buffer(&file);
 		clear_buffer(&byte_code);

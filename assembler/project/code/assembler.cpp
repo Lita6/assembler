@@ -17,7 +17,7 @@ struct list_entry
 {
 	list_entry_type type;
 	String name;
-	u64 value;
+	u64 value; // NOTE: storing imm numbers and reg addresses
 };
 
 struct reserved_list
@@ -37,6 +37,15 @@ add_to_list
 	temp->type = type;
 	temp->value = value;
 }
+
+#if 0
+void
+FillOperand
+()
+{
+	
+}
+#endif
 
 global reserved_list Reserved_Strings;
 
@@ -67,51 +76,74 @@ assemble
 	
 	Instruction instr = {};
 	b32 InstructionComplete = FALSE;
-	list_entry token = {};
+	String token = {};
 	b32 CompleteToken = FALSE;
 	u64 EndOfFile = src.len - 1;
+	u32 CurrentOperand = 0;
 	for(u64 i = 0; i < src.len; i++)
 	{
 		
 		if(IsWhiteSpace(src.chars[i]) == TRUE)
 		{
-			CompleteToken = (token.name.chars == 0) ? FALSE : TRUE;
+			CompleteToken = (token.chars == 0) ? FALSE : TRUE;
 		}
 		else
 		{
 			
 			if(i == EndOfFile)
 			{
-				CompleteToken = (token.name.chars == 0) ? FALSE : TRUE;
+				CompleteToken = (token.chars == 0) ? FALSE : TRUE;
 			}
 			
-			if(token.name.chars == 0)
+			if(token.chars == 0)
 			{
-				token.name.chars = &src.chars[i];
+				token.chars = &src.chars[i];
 			}
 			
-			token.name.len++;
+			token.len++;
 		}
 		
 		if(CompleteToken == TRUE)
 		{		
-			if(IsNumber(token.name.chars[0]) == TRUE)
+			if(IsNumber(token) == TRUE)
 			{
-				token.type = imm;
+				
+				list_entry *operand = &instr.operands[CurrentOperand++];
+				operand->name = token;
+				operand->type = imm;
+				operand->value = StringToU64(token);
+				if((CurrentOperand == 2) && (instr.operation.type != none))
+				{
+					InstructionComplete = TRUE;
+				}
+				
 			}
-			
-			if(token.type != imm)
+			else
 			{
 				for(u32 n = 0; n < Reserved_Strings.count; n++)
 				{
 					
 					list_entry *entry = &Reserved_Strings.start[n];
-					if(token.name.chars[0] == entry->name.chars[0])
+					if(token == entry->name)
 					{
+						
+						if(entry->type == reg)
+						{
+							instr.operands[CurrentOperand++] = *entry;
+							if((CurrentOperand == 2) && (instr.operation.type != none))
+							{
+								InstructionComplete = TRUE;
+							}
+							
+						}
+						else
+						{
+							
+							instr.operation = *entry;
+						}
 						
 						if(entry->type == ret)
 						{
-							instr.operation = *entry;
 							InstructionComplete = TRUE;
 						}
 						
@@ -128,6 +160,19 @@ assemble
 					buffer_append_u8(byte_code, 0xc3);
 					instr = {};
 					InstructionComplete = FALSE;
+					
+				}
+				else if(instr.operation.type == mov_right)
+				{
+					// NOTE: The source and destination operands are swapped.
+					
+					buffer_append_u8(byte_code, 0xb8);
+					buffer_append_u32(byte_code, (u32)instr.operands[0].value);
+					
+					instr = {};
+					InstructionComplete = FALSE;
+					CurrentOperand = 0;
+					
 				}
 			}
 			

@@ -215,6 +215,34 @@ struct String
 	u64 len;
 };
 
+b32
+operator==
+(String a, String b)
+{
+	b32 result = TRUE;
+	
+	if(a.len != b.len)
+	{
+		result = FALSE;
+		
+	}
+	else
+	{
+		for(u64 i = 0; i < a.len; i++)
+		{
+			
+			if(a.chars[i] != b.chars[i])
+			{
+				result = FALSE;
+				break;
+				
+			}
+		}
+	}
+	
+	return(result);
+}
+
 String
 create_string
 (Buffer *buffer, char *str)
@@ -262,17 +290,23 @@ IsLetter
 
 b32
 IsNumber
-(u8 ch)
+(String string)
 {
 	
-	b32 result = FALSE;
-	if((ch >= '0') && (ch <= '9'))
+	b32 result = TRUE;
+	for(u64 i = 0; i < string.len; i++)
 	{
-		result = TRUE;
+		
+		if((string.chars[i] < '0') || (string.chars[i] > '9'))
+		{
+			result = FALSE;
+		}
 	}
+	
 	return(result);
 }
 
+#if 0
 b32
 IsAlphaNum
 (u8 ch)
@@ -283,8 +317,10 @@ IsAlphaNum
 	{
 		result = TRUE;
 	}
+	
 	return(result);
 }
+#endif
 
 b32
 IsWhiteSpace
@@ -317,6 +353,55 @@ ConvertNumToHex
 	}
 	
 	return(MAX_U8);
+}
+
+u64
+StringToU64
+(String string)
+{
+	u64 Result = 0;
+	
+	for(u64 i = 0; i < string.len; i++)
+	{
+		Result = Result + (string.chars[i] - '0');
+		
+		if(i != (string.len - 1))
+		{
+			Result = Result * 10;
+		}
+	}
+	
+	return(Result);
+}
+
+s64
+StringToS64
+(String string)
+{
+	s64 Result = 0;
+	
+	u32 neg = 0;
+	if(string.chars[0] == '-')
+	{
+		neg = 1;
+	}
+	
+	for(u64 i = neg; i < string.len; i++)
+	{
+		Result = Result + (string.chars[i] - '0');
+		
+		if(i != (string.len - 1))
+		{
+			Result = Result * 10;
+		}
+	}
+	
+	if(neg != 0)
+	{
+		Result = Result * -1;
+	}
+	
+	return(Result);
 }
 
 #endif //WIN64_ASSEMBLER_H
