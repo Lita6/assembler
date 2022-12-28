@@ -38,15 +38,6 @@ add_to_list
 	temp->value = value;
 }
 
-#if 0
-void
-FillOperand
-()
-{
-	
-}
-#endif
-
 global reserved_list Reserved_Strings;
 
 void
@@ -72,7 +63,6 @@ void
 assemble
 (Buffer *byte_code, String src)
 {
-	// TODO: token can go back to being a string because if it's identified as an operand then the instr can be filled out instead
 	
 	Instruction instr = {};
 	b32 InstructionComplete = FALSE;
