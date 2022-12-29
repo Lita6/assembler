@@ -236,26 +236,6 @@ GetStringLength
 	return(result);
 }
 
-u8
-ConvertNumToHex
-(char letter, String Hexadecimals)
-{
-	if((letter >= 'a') && (letter <= 'f'))
-	{
-		letter += 'A' - 'a';
-	}
-	
-	for(u8 i = 0; i < Hexadecimals.len; i++)
-	{
-		if(letter == Hexadecimals.chars[i])
-		{
-			return(i);
-		}
-	}
-	
-	return(MAX_U8);
-}
-
 b32
 IsMemZero
 (u8 *memory, u32 size)

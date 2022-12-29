@@ -101,6 +101,7 @@ struct dos_header
 #pragma pack(push, 1)
 struct coff_header
 {
+	u8 PESignature[4];
 	u16 machine;
 	u16 numberOfSections;
 	u32 timeDateStamp;
@@ -114,7 +115,7 @@ struct coff_header
 #pragma pack(push, 1)
 struct pe_opt_header
 {
-	u16 PESignature;
+	u16 Format;
 	u8 MajorLinkerVersion; 
 	u8 MinorLinkerVersion;
 	u32 SizeOfCode;
@@ -248,8 +249,6 @@ WinMainCRTStartup
 	Buffer Buffer_IDT  = win64_make_buffer(PAGE, PAGE_READWRITE);
 	Buffer Buffer_ILT  = win64_make_buffer(PAGE, PAGE_READWRITE);
 	
-	String Hexadecimals = create_string(&Strings, "0123456789ABCDEF");
-	
 	read_file_result Executable = Win64ReadEntireFile("D:\\Programming\\GitHub\\assembler\\HMH\\build\\win64_handmade.exe");
 	DWORD OldProtect = 0;
 	s32 ChangedProtection = VirtualProtect(Executable.Contents, Executable.ContentsSize, PAGE_READONLY, &OldProtect);
@@ -263,13 +262,12 @@ WinMainCRTStartup
 	win64_file_header header = {};
 	header.DOSHeader = (dos_header *)Executable.Contents;
 	
-	u32 PE00 = 4;
-	header.COFFHeader = (coff_header *)((u8 *)Executable.Contents + header.DOSHeader->e_lfanew + PE00);
+	header.COFFHeader = (coff_header *)((u8 *)Executable.Contents + header.DOSHeader->e_lfanew);
 	
 	header.PEOptHeader = (pe_opt_header *)((u8 *)header.COFFHeader + sizeof(coff_header));
 	
 	u8 *EndPEOptHeader = (u8 *)header.PEOptHeader + sizeof(pe_opt_header);
-	if(header.PEOptHeader->PESignature == 0x10b)
+	if(header.PEOptHeader->Format == 0x10b)
 	{
 		Assert(!"32 bit version of PE Optional Header required.");
 		//header.BaseOfData = *(u32 *)EndPEOptHeader;
