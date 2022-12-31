@@ -257,8 +257,8 @@ WinMainCRTStartup
 	// NOTE: 5.2 is for Windows XP 64 bit
 	extension->MajorOSVersion = 5;
 	extension->MinorOSVersion = 2;
-	//extension->MajorSubsystemVersion = 5;
-	//extension->MinorSubsystemVersion = 2;
+	extension->MajorSubsystemVersion = 5;
+	extension->MinorSubsystemVersion = 2;
 	extension->SizeOfImage = extension->SectionAlignment * (coff->numberOfSections + 1);
 	
 	u32 headerSize = sizeof(dos_header) + sizeof(coff_header) + coff->sizeOfOptionalHeader + (sizeof(image_section_header) * coff->numberOfSections);
@@ -270,6 +270,18 @@ WinMainCRTStartup
 	}
 	extension->SizeOfHeaders = headerSize;
 	
+	extension->Subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI;
+	extension->DLLCharacteristics = 
+		IMAGE_DLLCHARACTERISTICS_HIGH_ENTROPY_VA | 
+		IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE | 
+		IMAGE_DLLCHARACTERISTICS_NX_COMPAT | 
+		IMAGE_DLLCHARACTERISTICS_NO_ISOLATION | 
+		IMAGE_DLLCHARACTERISTICS_NO_SEH | 
+		IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE;
+	
+	// TODO: Figure out about stacks and heaps
+	
+	extension->NumberOfRvaAndSizes = 16;
 	
 	return(0);
 }
