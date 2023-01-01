@@ -160,7 +160,7 @@ struct image_section_header
 	union {
 		u32 PhysicalAddress;
 		u32 VirtualSize;
-	} Misc;
+	};
 	u32 VirtualAddress;
 	u32 SizeOfRawData;
 	u32 PointerToRawData;
@@ -197,6 +197,25 @@ struct debug_directory
 };
 #pragma pack(pop)
 
+u32
+AlignSize
+(u32 size, u32 align)
+{
+	u32 result = 0;
+	
+	u32 mod = size % align;
+	if(mod != 0)
+	{
+		result = size + (align - mod);
+	}
+	else
+	{
+		result = size;
+	}
+	
+	return(result);
+}
+
 int __stdcall
 WinMainCRTStartup
 (void)
@@ -207,9 +226,14 @@ WinMainCRTStartup
 	Assert(SysInfo.dwPageSize != 0);
 	PAGE = SysInfo.dwPageSize;
 	
-	// TODO: GetCommandLine for the name of the file to assemble
+	// TODO: GetCommandLine for the name of the file to assemble and name of file to output
 	
-	read_file_result file = Win64ReadEntireFile("d:\\programming\\github\\assembler\\game\\game.laf");
+	Buffer winData = win64_make_buffer(PAGE, PAGE_READWRITE);
+	String outputName = create_string(&winData, "d:\\programming\\github\\assembler\\game\\build\\game.exe");
+	// NOTE: This is going to get passed to Windows and needs to be null terminated.
+	buffer_append_u8(&winData, 0);
+	
+	read_file_result file = Win64ReadEntireFile("d:\\programming\\github\\assembler\\game\\project\\code\\game.laf");
 	String src = {};
 	src.chars = (u8 *)file.Contents;
 	src.len = GetStringLength(src.chars);
@@ -230,7 +254,7 @@ WinMainCRTStartup
 	coff_header *coff = (coff_header *)(program.memory + dos->e_lfanew);
 	coff->PESignature[0] = 'P';
 	coff->PESignature[1] = 'E';
-	coff->machine = 0x8664;
+	coff->machine = 0x8664; // NOTE: AMD64
 	coff->numberOfSections = 1;
 	
 	// NOTE: filetime is in 100 nanoseconds
@@ -262,13 +286,7 @@ WinMainCRTStartup
 	extension->SizeOfImage = extension->SectionAlignment * (coff->numberOfSections + 1);
 	
 	u32 headerSize = sizeof(dos_header) + sizeof(coff_header) + coff->sizeOfOptionalHeader + (sizeof(image_section_header) * coff->numberOfSections);
-	
-	u32 mod = headerSize % extension->FileAlignment;
-	if(mod != 0)
-	{
-		headerSize += extension->FileAlignment - mod;
-	}
-	extension->SizeOfHeaders = headerSize;
+	extension->SizeOfHeaders = AlignSize(headerSize, extension->FileAlignment);
 	
 	extension->Subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI;
 	extension->DLLCharacteristics = 
@@ -278,10 +296,35 @@ WinMainCRTStartup
 		IMAGE_DLLCHARACTERISTICS_NO_ISOLATION | 
 		IMAGE_DLLCHARACTERISTICS_NO_SEH | 
 		IMAGE_DLLCHARACTERISTICS_TERMINAL_SERVER_AWARE;
-	
-	// TODO: Figure out about stacks and heaps
-	
+	extension->SizeOfStackReserve = 0x100000;
+	extension->SizeOfStackCommit = 0x100000;
 	extension->NumberOfRvaAndSizes = 16;
+	
+	image_section_header *sectionHeader = (image_section_header *)((u8 *)optionalHeader + coff->sizeOfOptionalHeader);
+	sectionHeader->Name[0] = '.';
+	sectionHeader->Name[1] = 't';
+	sectionHeader->Name[2] = 'e';
+	sectionHeader->Name[3] = 'x';
+	sectionHeader->Name[4] = 't';
+	sectionHeader->VirtualSize = optionalHeader->SizeOfCode;
+	sectionHeader->VirtualAddress = extension->SectionAlignment;
+	sectionHeader->SizeOfRawData = AlignSize(optionalHeader->SizeOfCode, extension->FileAlignment);
+	sectionHeader->PointerToRawData = extension->SizeOfHeaders;
+	sectionHeader->Characteristics = 
+		IMAGE_SCN_CNT_CODE |
+		IMAGE_SCN_MEM_EXECUTE |
+		IMAGE_SCN_MEM_READ;
+	
+	u8 *TextSection = program.memory + sectionHeader->PointerToRawData;
+	
+	for(u32 i = 0; i < optionalHeader->SizeOfCode; i++)
+	{
+		TextSection[i] = byte_code.memory[i];
+	}
+	
+	u32 programSize = sectionHeader->PointerToRawData + sectionHeader->SizeOfRawData;
+	b32 writeSucceded = Win64WriteEntireFile((char *)outputName.chars, programSize, (void *)program.memory);
+	(void)writeSucceded;
 	
 	return(0);
 }
