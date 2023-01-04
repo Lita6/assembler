@@ -54,5 +54,38 @@ WinMainCRTStartup
 		clear_buffer(&byte_code);
 	}
 	
+	{
+		String src = create_string(&file, "eax <- 42\r\nret");
+		assemble(&byte_code, src);
+		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
+		u32 result = test();
+		Assert(result == 42);
+		
+		clear_buffer(&file);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "89 -> ecx\r\n0 -> eax\r\nret");
+		assemble(&byte_code, src);
+		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
+		u32 result = test();
+		Assert(result == 0);
+		
+		clear_buffer(&file);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "89 -> r8d\r\n0 -> eax\r\nret");
+		assemble(&byte_code, src);
+		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
+		u32 result = test();
+		Assert(result == 0);
+		
+		clear_buffer(&file);
+		clear_buffer(&byte_code);
+	}
+	
 	return(0);
 }

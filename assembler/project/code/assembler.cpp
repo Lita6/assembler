@@ -1,7 +1,29 @@
+/* TODO: There's a few things to do to get my program somewhere that can call
+*        a windows function
+*
+*    sub an immediate from rsp
+*    add an immediate to rsp
+*    - add instruction
+*    - sub instruction
+*    - MODRM bit
+*    - operand sizing
+*
+*    lea instruction based on rip
+*    - because I need an address to a string from within my program
+*    call a function pointer based on rip
+*    - window's loader is going to put the function address in my program
+*/
+
 #include "win64_assembler.h"
 
 typedef void (*fn_void_to_void)();
 typedef u32 (*fn_void_to_u32)();
+
+#define REX   0x40
+#define REX_W 0x08
+#define REX_R 0x04
+#define REX_X 0x02
+#define REX_B 0x01
 
 enum list_entry_type
 {
@@ -48,8 +70,26 @@ init
 	
 	add_to_list(reserved, strings, &Reserved_Strings, "->", mov_right, 0);
 	add_to_list(reserved, strings, &Reserved_Strings, "<-", mov_left, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "eax", reg, 0);
 	add_to_list(reserved, strings, &Reserved_Strings, "ret", ret, 0);
+	
+	/* REGISTERS */
+	add_to_list(reserved, strings, &Reserved_Strings, "eax", reg, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "ecx", reg, 1);
+	add_to_list(reserved, strings, &Reserved_Strings, "edx", reg, 2);
+	add_to_list(reserved, strings, &Reserved_Strings, "ebx", reg, 3);
+	add_to_list(reserved, strings, &Reserved_Strings, "esp", reg, 4);
+	add_to_list(reserved, strings, &Reserved_Strings, "ebp", reg, 5);
+	add_to_list(reserved, strings, &Reserved_Strings, "esi", reg, 6);
+	add_to_list(reserved, strings, &Reserved_Strings, "edi", reg, 7);
+	
+	add_to_list(reserved, strings, &Reserved_Strings, "r8d", reg, 8);
+	add_to_list(reserved, strings, &Reserved_Strings, "r9d", reg, 9);
+	add_to_list(reserved, strings, &Reserved_Strings, "r10d", reg, 10);
+	add_to_list(reserved, strings, &Reserved_Strings, "r11d", reg, 11);
+	add_to_list(reserved, strings, &Reserved_Strings, "r12d", reg, 12);
+	add_to_list(reserved, strings, &Reserved_Strings, "r13d", reg, 13);
+	add_to_list(reserved, strings, &Reserved_Strings, "r14d", reg, 14);
+	add_to_list(reserved, strings, &Reserved_Strings, "r15d", reg, 15);
 	
 }
 
@@ -144,25 +184,43 @@ assemble
 			
 			if(InstructionComplete == TRUE)
 			{
-				if(instr.operation.type == ret)
+				
+				switch (instr.operation.type)
 				{
+				  case ret:
+					{
+						
+						buffer_append_u8(byte_code, 0xc3);
+						instr = {};
+						InstructionComplete = FALSE;
+						
+					}break;
 					
-					buffer_append_u8(byte_code, 0xc3);
-					instr = {};
-					InstructionComplete = FALSE;
-					
-				}
-				else if(instr.operation.type == mov_right)
-				{
-					// NOTE: The source and destination operands are swapped.
-					
-					buffer_append_u8(byte_code, 0xb8);
-					buffer_append_u32(byte_code, (u32)instr.operands[0].value);
-					
-					instr = {};
-					InstructionComplete = FALSE;
-					CurrentOperand = 0;
-					
+					case mov_right:
+					{
+						list_entry temp = instr.operands[0];
+						instr.operands[0] = instr.operands[1];
+						instr.operands[1] = temp;
+						
+					}; // NOTE: Fall through to move_left
+					case mov_left:
+					{
+						
+						if(instr.operands[0].value > 7)
+						{
+							u8 rex = REX | REX_B;
+							buffer_append_u8(byte_code, rex);
+						}
+						
+						u8 op = (u8)(0xb8 | (instr.operands[0].value & 0b0111));
+						buffer_append_u8(byte_code, op);
+						buffer_append_u32(byte_code, (u32)instr.operands[1].value);
+						
+						instr = {};
+						InstructionComplete = FALSE;
+						CurrentOperand = 0;
+						
+					}break;
 				}
 			}
 			
