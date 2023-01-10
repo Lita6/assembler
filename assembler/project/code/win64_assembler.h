@@ -29,6 +29,11 @@ typedef uint64_t u64;
 #define MAX_U32 0xFFFFFFFF
 #define MAX_U64 0XFFFFFFFFFFFFFFFF
 
+global u8 size_8 = sizeof(u8);
+global u8 size_16 = sizeof(u16);
+global u8 size_32 = sizeof(u32);
+global u8 size_64 = sizeof(u64);
+
 typedef s8 b8;
 typedef s16 b16;
 typedef s32 b32;

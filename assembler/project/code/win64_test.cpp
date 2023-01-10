@@ -90,9 +90,20 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "155 -> r8\r\nr8 -> rax\r\nret");
 		assemble(&byte_code, src);
-		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
-		u32 result = test();
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
 		Assert(result == 155);
+		
+		clear_buffer(&file);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "155 -> r8\r\nr8 + 5\r\nr8 -> rax\r\nret");
+		assemble(&byte_code, src);
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == 160);
 		
 		clear_buffer(&file);
 		clear_buffer(&byte_code);

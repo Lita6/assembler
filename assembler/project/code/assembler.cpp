@@ -3,7 +3,6 @@
 *
 *    sub an immediate from rsp
 *    add an immediate to rsp
-*    - add instruction
 *    - sub instruction
 *
 *    lea instruction based on rip
@@ -16,6 +15,7 @@
 
 typedef void (*fn_void_to_void)();
 typedef u32 (*fn_void_to_u32)();
+typedef u64 (*fn_void_to_u64)();
 
 #define REX   0x40
 #define REX_W 0x08
@@ -39,6 +39,7 @@ struct list_entry
 	list_entry_type type;
 	String name;
 	u8 size;
+	u8 opcode_extension;
 	u8 reg_address;
 	u64 imm_value;
 };
@@ -51,7 +52,7 @@ struct reserved_list
 
 void
 add_to_list
-(Buffer *list_buffer, Buffer *strings, reserved_list *list, char *str, list_entry_type type, u8 size, u8 reg_address, u64 imm_value)
+(Buffer *list_buffer, Buffer *strings, reserved_list *list, char *str, list_entry_type type, u8 size, u8 opcode_extension, u8 reg_address, u64 imm_value)
 {
 	
 	list_entry *temp = (list_entry *)buffer_allocate(list_buffer, sizeof(list_entry));
@@ -59,6 +60,7 @@ add_to_list
 	temp->name = create_string(strings, str);
 	temp->type = type;
 	temp->size = size;
+	temp->opcode_extension = opcode_extension;
 	temp->reg_address = reg_address;
 	temp->imm_value = imm_value;
 }
@@ -71,49 +73,47 @@ init
 {
 	Reserved_Strings.start = (list_entry *)reserved->memory;
 	
-	add_to_list(reserved, strings, &Reserved_Strings, "->", mov_right, 0, 0, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "<-", mov_left, 0, 0, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "ret", ret, 0, 0, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "+", add, 0, 0, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "->", mov_right, 0, 0, 0, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "<-", mov_left, 0, 0, 0, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "ret", ret, 0, 0, 0, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "+", add, 0, 0, 0, 0);
 	
 	/* REGISTERS */
-	u8 size_32 = sizeof(u32);
-	add_to_list(reserved, strings, &Reserved_Strings, "eax", reg, size_32, 0, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "ecx", reg, size_32, 1, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "edx", reg, size_32, 2, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "ebx", reg, size_32, 3, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "esp", reg, size_32, 4, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "ebp", reg, size_32, 5, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "esi", reg, size_32, 6, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "edi", reg, size_32, 7, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "eax", reg, size_32, 0, 0, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "ecx", reg, size_32, 0, 1, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "edx", reg, size_32, 0, 2, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "ebx", reg, size_32, 0, 3, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "esp", reg, size_32, 0, 4, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "ebp", reg, size_32, 0, 5, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "esi", reg, size_32, 0, 6, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "edi", reg, size_32, 0, 7, 0);
 	
-	add_to_list(reserved, strings, &Reserved_Strings, "r8d", reg, size_32, 8, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r9d", reg, size_32, 9, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r10d", reg, size_32, 10, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r11d", reg, size_32, 11, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r12d", reg, size_32, 12, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r13d", reg, size_32, 13, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r14d", reg, size_32, 14, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r15d", reg, size_32, 15, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r8d", reg, size_32, 0, 8, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r9d", reg, size_32, 0, 9, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r10d", reg, size_32, 0, 10, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r11d", reg, size_32, 0, 11, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r12d", reg, size_32, 0, 12, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r13d", reg, size_32, 0, 13, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r14d", reg, size_32, 0, 14, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r15d", reg, size_32, 0, 15, 0);
 	
-	u8 size_64 = sizeof(u64);
-	add_to_list(reserved, strings, &Reserved_Strings, "rax", reg, size_64, 0, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "rcx", reg, size_64, 1, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "rdx", reg, size_64, 2, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "rbx", reg, size_64, 3, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "rsp", reg, size_64, 4, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "rbp", reg, size_64, 5, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "rsi", reg, size_64, 6, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "rdi", reg, size_64, 7, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "rax", reg, size_64, 0, 0, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "rcx", reg, size_64, 0, 1, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "rdx", reg, size_64, 0, 2, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "rbx", reg, size_64, 0, 3, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "rsp", reg, size_64, 0, 4, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "rbp", reg, size_64, 0, 5, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "rsi", reg, size_64, 0, 6, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "rdi", reg, size_64, 0, 7, 0);
 	
-	add_to_list(reserved, strings, &Reserved_Strings, "r8", reg, size_64, 8, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r9", reg, size_64, 9, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r10", reg, size_64, 10, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r11", reg, size_64, 11, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r12", reg, size_64, 12, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r13", reg, size_64, 13, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r14", reg, size_64, 14, 0);
-	add_to_list(reserved, strings, &Reserved_Strings, "r15", reg, size_64, 15, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r8", reg, size_64, 0, 8, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r9", reg, size_64, 0, 9, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r10", reg, size_64, 0, 10, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r11", reg, size_64, 0, 11, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r12", reg, size_64, 0, 12, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r13", reg, size_64, 0, 13, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r14", reg, size_64, 0, 14, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "r15", reg, size_64, 0, 15, 0);
 	
 }
 
@@ -122,6 +122,16 @@ struct Instruction
 	list_entry operation;
 	list_entry operands[2];
 };
+
+void
+swap_operands
+(Instruction *instruction)
+{
+	
+	list_entry temp = instruction->operands[0];
+	instruction->operands[0] = instruction->operands[1];
+	instruction->operands[1] = temp;
+}
 
 void
 assemble
@@ -208,92 +218,118 @@ assemble
 			
 			if(InstructionComplete == TRUE)
 			{
-				
+				u8 op_code = 0;
+				b32 useModrm = FALSE;
+				u8 modrm = 0;
 				switch (instr.operation.type)
 				{
 				  case ret:
 					{
 						
-						buffer_append_u8(byte_code, 0xc3);
-						instr = {};
-						InstructionComplete = FALSE;
+						op_code = 0xc3;
+					}break;
+					
+				  case add:
+					{
+						
+						if(instr.operands[0].type == imm)
+						{
+							swap_operands(&instr);
+						}
+						
+						if(instr.operands[1].type == imm)
+						{
+							instr.operands[1].size = size_8;
+						}
+						
+						op_code = 0x83;
+						
+						u8 reg_op = (u8)(instr.operation.opcode_extension & 0b0111);
+						u8 reg_mem = (u8)(instr.operands[0].reg_address & 0b0111);
+						modrm = (u8)(0xc0 | (reg_op << 3) | reg_mem);
+						useModrm = TRUE;
 						
 					}break;
 					
 					case mov_right:
 					{
-						list_entry temp = instr.operands[0];
-						instr.operands[0] = instr.operands[1];
-						instr.operands[1] = temp;
-						
-					}; // NOTE: Fall through to move_left
+						swap_operands(&instr);
+					}; // NOTE: Fall through to mov_left.
 					case mov_left:
 					{
-						
-						u8 rex = 0;
-						
-						if((instr.operands[0].size == sizeof(u64)) || (instr.operands[1].size == sizeof(u64)))
-						{
-							rex = REX | REX_W;
-						}
-						
 						if(instr.operands[1].type == imm)
 						{
 							
-							if(instr.operands[0].reg_address > 7)
-							{
-								rex = (u8)(rex | REX | REX_B);
-							}
-							
-							if(rex != 0)
-							{
-								buffer_append_u8(byte_code, rex);
-							}
-							
-							u8 op = (u8)(0xb8 | (instr.operands[0].reg_address & 0b0111));
-							buffer_append_u8(byte_code, op);
-							
-							if((rex & REX_W) == 0)
-							{
-								buffer_append_u32(byte_code, (u32)instr.operands[1].imm_value);
-							}
-							else
-							{
-								buffer_append_u64(byte_code, instr.operands[1].imm_value);
-							}
+							op_code = (u8)(0xb8 | (instr.operands[0].reg_address & 0b0111));
+							instr.operands[1].size = instr.operands[0].size;
 						}
 						else
 						{
-							
-							if(instr.operands[0].reg_address > 7)
-							{
-								rex = (u8)(rex | REX | REX_B);
-							}
-							
-							if(instr.operands[1].reg_address > 7)
-							{
-								rex = (u8)(rex | REX | REX_R);
-							}
-							
-							if(rex != 0)
-							{
-								buffer_append_u8(byte_code, rex);
-							}
-							
-							buffer_append_u8(byte_code,  0x89);
+							op_code = 0x89;
 							
 							u8 reg_op = (u8)(instr.operands[1].reg_address & 0b0111);
 							u8 reg_mem = (u8)(instr.operands[0].reg_address & 0b0111);
-							u8 modrm = (u8)(0xc0 | (reg_op << 3) | reg_mem);
-							buffer_append_u8(byte_code, modrm);
+							modrm = (u8)(0xc0 | (reg_op << 3) | reg_mem);
+							useModrm = TRUE;
 						}
-						
-						instr = {};
-						InstructionComplete = FALSE;
-						CurrentOperand = 0;
 						
 					}break;
 				}
+				
+				u8 rex = 0;
+				if((instr.operands[0].size == sizeof(u64)) || (instr.operands[1].size == sizeof(u64)))
+				{
+					rex = REX | REX_W;
+				}
+				
+				if(instr.operands[0].reg_address > 7)
+				{
+					rex = (u8)(rex | REX | REX_B);
+				}
+				if(instr.operands[1].reg_address > 7)
+				{
+					rex = (u8)(rex | REX | REX_R);
+				}
+				
+				if(rex != 0)
+				{
+					buffer_append_u8(byte_code, rex);
+				}
+				
+				buffer_append_u8(byte_code, op_code);
+				
+				if(useModrm == TRUE)
+				{
+					buffer_append_u8(byte_code, modrm);
+				}
+				
+				if(instr.operands[1].type == imm)
+				{
+					if(instr.operands[1].size == size_8)
+					{
+						
+						buffer_append_u8(byte_code, (u8)instr.operands[1].imm_value);
+					}
+					else if(instr.operands[1].size == size_16)
+					{
+						
+						buffer_append_u16(byte_code, (u16)instr.operands[1].imm_value);
+					}
+					else if(instr.operands[1].size == size_32)
+					{
+						
+						buffer_append_u32(byte_code, (u32)instr.operands[1].imm_value);
+					}
+					else if(instr.operands[1].size == size_64)
+					{
+						
+						buffer_append_u64(byte_code, instr.operands[1].imm_value);
+					}
+				}
+				
+				CurrentOperand = 0;
+				instr = {};
+				InstructionComplete = FALSE;
 			}
 			
 			CompleteToken = FALSE;
