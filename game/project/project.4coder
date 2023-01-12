@@ -1,7 +1,7 @@
 version(2);
 project_name = "game.exe";
 patterns = {
-"*.laf",
+"*.laugh",
 "*.bat",
 "*.4coder",
 "*.txt"

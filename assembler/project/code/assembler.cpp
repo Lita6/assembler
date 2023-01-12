@@ -1,12 +1,16 @@
 /* TODO: There's a few things to do to get my program somewhere that can call
 *        a windows function
 *
-*    sub an immediate from rsp
-*    add an immediate to rsp
-*    - sub instruction
-*
 *    lea instruction based on rip
-*    - because I need an address to a string from within my program
+*    - put string data in the resource section
+*    - implement variables
+*      - dynamic array of variable names
+*      - reserved words for types
+*      - variable to keep track of stack adjustment amount
+*    - add lea instruction
+*    - improve test's ability to support the resource section
+*    - improve assembler's ability to support the resource section
+*
 *    call a function pointer based on rip
 *    - window's loader is going to put the function address in my program
 */
@@ -30,6 +34,7 @@ enum list_entry_type
 	mov_left,
 	mov_right,
 	add,
+	sub,
 	reg,
 	imm,
 };
@@ -77,6 +82,7 @@ init
 	add_to_list(reserved, strings, &Reserved_Strings, "<-", mov_left, 0, 0, 0, 0);
 	add_to_list(reserved, strings, &Reserved_Strings, "ret", ret, 0, 0, 0, 0);
 	add_to_list(reserved, strings, &Reserved_Strings, "+", add, 0, 0, 0, 0);
+	add_to_list(reserved, strings, &Reserved_Strings, "-", sub, 0, 0b101, 0, 0);
 	
 	/* REGISTERS */
 	add_to_list(reserved, strings, &Reserved_Strings, "eax", reg, size_32, 0, 0, 0);
@@ -135,8 +141,11 @@ swap_operands
 
 void
 assemble
-(Buffer *byte_code, String src)
+(Buffer *program, String src)
 {
+	U8_Array *header = (U8_Array *)(buffer_allocate(program, (2 * sizeof(U8_Array))));
+	Buffer byte_code = create_buffer(program, 64);
+	Buffer resource = create_buffer(program, 64);
 	
 	Instruction instr = {};
 	b32 InstructionComplete = FALSE;
@@ -221,6 +230,7 @@ assemble
 				u8 op_code = 0;
 				b32 useModrm = FALSE;
 				u8 modrm = 0;
+				
 				switch (instr.operation.type)
 				{
 				  case ret:
@@ -229,6 +239,7 @@ assemble
 						op_code = 0xc3;
 					}break;
 					
+					case sub:
 				  case add:
 					{
 						
@@ -236,7 +247,6 @@ assemble
 						{
 							swap_operands(&instr);
 						}
-						
 						if(instr.operands[1].type == imm)
 						{
 							instr.operands[1].size = size_8;
@@ -293,14 +303,14 @@ assemble
 				
 				if(rex != 0)
 				{
-					buffer_append_u8(byte_code, rex);
+					buffer_append_u8(&byte_code, rex);
 				}
 				
-				buffer_append_u8(byte_code, op_code);
+				buffer_append_u8(&byte_code, op_code);
 				
 				if(useModrm == TRUE)
 				{
-					buffer_append_u8(byte_code, modrm);
+					buffer_append_u8(&byte_code, modrm);
 				}
 				
 				if(instr.operands[1].type == imm)
@@ -308,22 +318,22 @@ assemble
 					if(instr.operands[1].size == size_8)
 					{
 						
-						buffer_append_u8(byte_code, (u8)instr.operands[1].imm_value);
+						buffer_append_u8(&byte_code, (u8)instr.operands[1].imm_value);
 					}
 					else if(instr.operands[1].size == size_16)
 					{
 						
-						buffer_append_u16(byte_code, (u16)instr.operands[1].imm_value);
+						buffer_append_u16(&byte_code, (u16)instr.operands[1].imm_value);
 					}
 					else if(instr.operands[1].size == size_32)
 					{
 						
-						buffer_append_u32(byte_code, (u32)instr.operands[1].imm_value);
+						buffer_append_u32(&byte_code, (u32)instr.operands[1].imm_value);
 					}
 					else if(instr.operands[1].size == size_64)
 					{
 						
-						buffer_append_u64(byte_code, instr.operands[1].imm_value);
+						buffer_append_u64(&byte_code, instr.operands[1].imm_value);
 					}
 				}
 				
@@ -337,4 +347,8 @@ assemble
 		}
 	}
 	
+	header[0].bytes = byte_code.memory;
+	header[0].len = (u64)(byte_code.end - byte_code.memory);
+	header[1].bytes = resource.memory;
+	header[1].len = (u64)(resource.end - resource.memory);
 }

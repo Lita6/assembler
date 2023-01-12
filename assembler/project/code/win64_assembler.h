@@ -124,7 +124,7 @@ Win64ReadEntireFile
 b32
 Win64WriteEntireFile(char *FileName, u32 MemorySize, void *Memory)
 {
-	b32 Result = false;
+	b32 Result = FALSE;
 	
 	HANDLE FileHandle = CreateFileA(FileName, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
 	if(FileHandle != INVALID_HANDLE_VALUE)
@@ -212,6 +212,19 @@ win64_make_buffer
 	buffer.size = size;
 	
 	return(buffer);
+}
+
+Buffer
+create_buffer
+(Buffer *mem, u32 size)
+{
+	
+	Buffer result = {};
+	result.memory = buffer_allocate(mem, size);
+	result.end = result.memory;
+	result.size = size;
+	
+	return(result);
 }
 
 struct String
@@ -408,5 +421,11 @@ StringToS64
 	
 	return(Result);
 }
+
+struct U8_Array
+{
+	u8 *bytes;
+	u64 len;
+};
 
 #endif //WIN64_ASSEMBLER_H

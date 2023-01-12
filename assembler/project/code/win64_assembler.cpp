@@ -233,7 +233,7 @@ WinMainCRTStartup
 	// NOTE: This is going to get passed to Windows and needs to be null terminated.
 	buffer_append_u8(&winData, 0);
 	
-	read_file_result file = Win64ReadEntireFile("d:\\programming\\github\\assembler\\game\\project\\code\\game.laf");
+	read_file_result file = Win64ReadEntireFile("d:\\programming\\github\\assembler\\game\\project\\code\\game.laugh");
 	String src = {};
 	src.chars = (u8 *)file.Contents;
 	src.len = GetStringLength(src.chars);
@@ -242,8 +242,9 @@ WinMainCRTStartup
 	Buffer strings = win64_make_buffer(PAGE, PAGE_READWRITE);
 	init(&reserved, &strings);
 	
-	Buffer byte_code = win64_make_buffer(PAGE, PAGE_EXECUTE_READWRITE);
+	Buffer byte_code = win64_make_buffer(PAGE, PAGE_READWRITE);
 	assemble(&byte_code, src);
+	U8_Array *program_header = (U8_Array *)(byte_code.memory);
 	
 	Buffer program = win64_make_buffer(PAGE, PAGE_READWRITE);
 	dos_header *dos = (dos_header *)program.memory;
@@ -268,7 +269,7 @@ WinMainCRTStartup
 	
 	pe_opt_header *optionalHeader = (pe_opt_header *)((u8 *)coff + sizeof(coff_header));
 	optionalHeader->Format = 0x20b; // NOTE: To indicate a PE32+ format
-	optionalHeader->SizeOfCode = (u32)(byte_code.end - byte_code.memory);
+	optionalHeader->SizeOfCode = (u32)(program_header[0].len);
 	
 	// NOTE: byte code is the first section and PAGE is the section alignment
 	optionalHeader->AddressOfEntryPoint = 1 * PAGE; // NOTE: main starts at the top
@@ -319,7 +320,7 @@ WinMainCRTStartup
 	
 	for(u32 i = 0; i < optionalHeader->SizeOfCode; i++)
 	{
-		TextSection[i] = byte_code.memory[i];
+		TextSection[i] = program_header[0].bytes[i];
 	}
 	
 	u32 programSize = sectionHeader->PointerToRawData + sectionHeader->SizeOfRawData;
