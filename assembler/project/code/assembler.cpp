@@ -1,12 +1,19 @@
 /* TODO: There's a few things to do to get my program somewhere that can call
 *        a windows function
 *
+*    rsp - STACK_ADJUST
+*    string winString <- "Hello, World!\0"
+*    winString &-> rcx
+*    call OutputDebugStringA
+*    eax <- 0
+*    rsp + STACK_ADJUST
+*    ret
+*
 *    lea instruction based on rip
-*    - put string data in the resource section
 *    - implement variables
 *      - dynamic array of variable names
-*      - reserved words for types
 *      - variable to keep track of stack adjustment amount
+*    - implement escape codes so I can easily null terminate a string
 *    - add lea instruction
 *    - improve test's ability to support the resource section
 *    - improve assembler's ability to support the resource section
@@ -37,6 +44,7 @@ enum list_entry_type
 	sub,
 	reg,
 	imm,
+	string,
 };
 
 struct list_entry
@@ -78,6 +86,7 @@ init
 {
 	Reserved_Strings.start = (list_entry *)reserved->memory;
 	
+	/* OPCODES */
 	add_to_list(reserved, strings, &Reserved_Strings, "->", mov_right, 0, 0, 0, 0);
 	add_to_list(reserved, strings, &Reserved_Strings, "<-", mov_left, 0, 0, 0, 0);
 	add_to_list(reserved, strings, &Reserved_Strings, "ret", ret, 0, 0, 0, 0);
@@ -121,6 +130,8 @@ init
 	add_to_list(reserved, strings, &Reserved_Strings, "r14", reg, size_64, 0, 14, 0);
 	add_to_list(reserved, strings, &Reserved_Strings, "r15", reg, size_64, 0, 15, 0);
 	
+	/* VARIABLE TYPES */
+	add_to_list(reserved, strings, &Reserved_Strings, "string", string, 0, 0, 0, 0);
 }
 
 struct Instruction
@@ -153,27 +164,61 @@ assemble
 	b32 CompleteToken = FALSE;
 	u64 EndOfFile = src.len - 1;
 	u32 CurrentOperand = 0;
+	
+	b32 processString = FALSE;
+	u8 *StringChars = 0;
+	u64 *StringLen = 0;
 	for(u64 i = 0; i < src.len; i++)
 	{
-		
-		if(IsWhiteSpace(src.chars[i]) == TRUE)
-		{
-			CompleteToken = (token.chars == 0) ? FALSE : TRUE;
-		}
-		else
+		if(processString == FALSE)
 		{
 			
-			if(i == EndOfFile)
+			if(IsWhiteSpace(src.chars[i]) == TRUE)
 			{
 				CompleteToken = (token.chars == 0) ? FALSE : TRUE;
 			}
-			
-			if(token.chars == 0)
+			else if(src.chars[i] == '"')
 			{
-				token.chars = &src.chars[i];
+				processString = TRUE;
+				
+				if(StringChars == 0)
+				{
+					StringLen = (u64 *)buffer_allocate(&resource, size_64);
+					StringChars = resource.end;
+				}
+				
 			}
+			else
+			{
+				
+				if(i == EndOfFile)
+				{
+					CompleteToken = (token.chars == 0) ? FALSE : TRUE;
+				}
+				
+				if(token.chars == 0)
+				{
+					token.chars = &src.chars[i];
+				}
+				
+				token.len++;
+			}
+		}
+		else if(processString == TRUE)
+		{
 			
-			token.len++;
+			if(src.chars[i] != '"')
+			{
+				buffer_append_u8(&resource, src.chars[i]);
+				(*StringLen)++;
+			}
+			else if(src.chars[i] == '"')
+			{
+				
+				processString = FALSE;
+				StringChars = 0;
+				StringLen = 0;
+			}
 		}
 		
 		if(CompleteToken == TRUE)

@@ -151,5 +151,18 @@ WinMainCRTStartup
 		clear_buffer(&byte_code);
 	}
 	
+	{
+		String src = create_string(&file, "\"Hello, World!\"\r\n0 -> rax\r\nret");
+		assemble(&program, src);
+		loadByteCode(&byte_code, program);
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == 0);
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
 	return(0);
 }
