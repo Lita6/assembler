@@ -48,6 +48,7 @@ typedef float r32;
 typedef double r64;
 
 #define Assert(Expression) if(!(Expression)) {*(int *)0 = 0;}
+#define unreferenced(name) (void)(name)
 
 u32
 SafeTruncateS64toU32(s64 Value)

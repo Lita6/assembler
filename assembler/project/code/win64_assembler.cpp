@@ -325,7 +325,7 @@ WinMainCRTStartup
 	
 	u32 programSize = sectionHeader->PointerToRawData + sectionHeader->SizeOfRawData;
 	b32 writeSucceded = Win64WriteEntireFile((char *)outputName.chars, programSize, (void *)program.memory);
-	(void)writeSucceded;
+	unreferenced(writeSucceded);
 	
 	return(0);
 }
