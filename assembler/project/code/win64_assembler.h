@@ -294,6 +294,7 @@ GetStringLength
 	return(result);
 }
 
+#if 0
 b32
 IsLetter
 (u8 ch)
@@ -306,6 +307,7 @@ IsLetter
 	}
 	return(result);
 }
+#endif
 
 b32
 IsNumber
@@ -324,22 +326,6 @@ IsNumber
 	
 	return(result);
 }
-
-#if 0
-b32
-IsAlphaNum
-(u8 ch)
-{
-	
-	b32 result = FALSE;
-	if((IsNumber(ch) == TRUE) || (IsLetter(ch) == TRUE))
-	{
-		result = TRUE;
-	}
-	
-	return(result);
-}
-#endif
 
 b32
 IsWhiteSpace
@@ -428,5 +414,24 @@ struct U8_Array
 	u8 *bytes;
 	u64 len;
 };
+
+u32
+AlignSize
+(u32 size, u32 align)
+{
+	u32 result = 0;
+	
+	u32 mod = size % align;
+	if(mod != 0)
+	{
+		result = size + (align - mod);
+	}
+	else
+	{
+		result = size;
+	}
+	
+	return(result);
+}
 
 #endif //WIN64_ASSEMBLER_H

@@ -34,7 +34,7 @@ WinMainCRTStartup
 	
 	{
 		String src = create_string(&file, "ret");
-		assemble(&program, &AssembleMemory, src);
+		assemble(&program, &AssembleMemory, src, PAGE);
 		loadByteCode(&byte_code, program);
 		fn_void_to_void test = (fn_void_to_void)byte_code.memory;
 		test();
@@ -47,7 +47,7 @@ WinMainCRTStartup
 	
 	{
 		String src = create_string(&file, "155 -> eax\r\nret");
-		assemble(&program, &AssembleMemory, src);
+		assemble(&program, &AssembleMemory, src, PAGE);
 		loadByteCode(&byte_code, program);
 		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
 		u32 result = test();
@@ -60,7 +60,7 @@ WinMainCRTStartup
 	
 	{
 		String src = create_string(&file, "0 -> eax\r\nret");
-		assemble(&program, &AssembleMemory, src);
+		assemble(&program, &AssembleMemory, src, PAGE);
 		loadByteCode(&byte_code, program);
 		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
 		u32 result = test();
@@ -73,7 +73,7 @@ WinMainCRTStartup
 	
 	{
 		String src = create_string(&file, "eax <- 42\r\nret");
-		assemble(&program, &AssembleMemory, src);
+		assemble(&program, &AssembleMemory, src, PAGE);
 		loadByteCode(&byte_code, program);
 		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
 		u32 result = test();
@@ -86,7 +86,7 @@ WinMainCRTStartup
 	
 	{
 		String src = create_string(&file, "89 -> ecx\r\necx -> eax\r\nret");
-		assemble(&program, &AssembleMemory, src);
+		assemble(&program, &AssembleMemory, src, PAGE);
 		loadByteCode(&byte_code, program);
 		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
 		u32 result = test();
@@ -99,7 +99,7 @@ WinMainCRTStartup
 	
 	{
 		String src = create_string(&file, "155 -> r8d\r\nr8d -> eax\r\nret");
-		assemble(&program, &AssembleMemory, src);
+		assemble(&program, &AssembleMemory, src, PAGE);
 		loadByteCode(&byte_code, program);
 		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
 		u32 result = test();
@@ -112,7 +112,7 @@ WinMainCRTStartup
 	
 	{
 		String src = create_string(&file, "155 -> r8\r\nr8 -> rax\r\nret");
-		assemble(&program, &AssembleMemory, src);
+		assemble(&program, &AssembleMemory, src, PAGE);
 		loadByteCode(&byte_code, program);
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
@@ -125,7 +125,7 @@ WinMainCRTStartup
 	
 	{
 		String src = create_string(&file, "155 -> r8\r\nr8 + 5\r\nr8 -> rax\r\nret");
-		assemble(&program, &AssembleMemory, src);
+		assemble(&program, &AssembleMemory, src, PAGE);
 		loadByteCode(&byte_code, program);
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
@@ -138,7 +138,7 @@ WinMainCRTStartup
 	
 	{
 		String src = create_string(&file, "155 -> r8\r\nr8 - 5\r\nr8 -> rax\r\nret");
-		assemble(&program, &AssembleMemory, src);
+		assemble(&program, &AssembleMemory, src, PAGE);
 		loadByteCode(&byte_code, program);
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
@@ -150,8 +150,34 @@ WinMainCRTStartup
 	}
 	
 	{
-		String src = create_string(&file, "\"Hello, World!\\0\"\r\nstring winString\r\n0 -> rax\r\nret");
-		assemble(&program, &AssembleMemory, src);
+		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\n0 -> rax\r\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadByteCode(&byte_code, program);
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == 0);
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\nwinString &-> rcx\r\n0 -> rax\r\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadByteCode(&byte_code, program);
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == 0);
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\nrcx <-& winString\r\n0 -> rax\r\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
 		loadByteCode(&byte_code, program);
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();

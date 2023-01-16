@@ -10,15 +10,15 @@
 *    ret
 *
 *    lea instruction based on rip
-*    - implement variables
-*      - dynamic array of variable names
-*      - variable to keep track of stack adjustment amount
 *    - add lea instruction
 *    - improve test's ability to support the resource section
 *    - improve assembler's ability to support the resource section
 *
 *    call a function pointer based on rip
 *    - window's loader is going to put the function address in my program
+*
+*    - implement variables
+*      - variable to keep track of stack adjustment amount
 */
 
 #include "win64_assembler.h"
@@ -41,6 +41,8 @@ enum list_entry_type
 	mov_right,
 	add,
 	sub,
+	lea_left,
+	lea_right,
 	reg,
 	imm,
 	string,
@@ -54,6 +56,7 @@ struct list_entry
 	u8 opcode_extension;
 	u8 reg_address;
 	u64 imm_value;
+	u32 resource_offset;
 };
 
 struct reserved_list
@@ -93,6 +96,8 @@ ReserveStrings
 	add_to_list(&Reserved_Strings, "ret", ret, 0, 0, 0, 0);
 	add_to_list(&Reserved_Strings, "+", add, 0, 0, 0, 0);
 	add_to_list(&Reserved_Strings, "-", sub, 0, 0b101, 0, 0);
+	add_to_list(&Reserved_Strings, "<-&", lea_left, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "&->", lea_right, 0, 0, 0, 0);
 	
 	/* REGISTERS */
 	add_to_list(&Reserved_Strings, "eax", reg, size_32, 0, 0, 0);
@@ -153,8 +158,10 @@ swap_operands
 
 void
 assemble
-(Buffer *program, Buffer *Memory, String src)
+(Buffer *program, Buffer *Memory, String src, u32 PAGE)
 {
+	unreferenced(PAGE);
+	
 	U8_Array *header = (U8_Array *)(buffer_allocate(program, (2 * sizeof(U8_Array))));
 	Buffer byte_code = create_buffer(program, 64);
 	Buffer resource = create_buffer(program, 64);
@@ -166,10 +173,12 @@ assemble
 		buffer_allocate(Memory, size_8);
 		
 		Reserved_Strings.strings = create_buffer(Memory, 1024);
-		Reserved_Strings.reserved = create_buffer(Memory, 2048);
+		Reserved_Strings.reserved = create_buffer(Memory, 1024*3);
 		ReserveStrings();
 		*IsInitialized = TRUE;
 	}
+	
+	Buffer patches = create_buffer(Memory, 1024);
 	
 	Instruction instr = {};
 	b32 InstructionComplete = FALSE;
@@ -192,6 +201,19 @@ assemble
 			if(IsWhiteSpace(src.chars[i]) == TRUE)
 			{
 				CompleteToken = (token.chars == 0) ? FALSE : TRUE;
+				
+				if((src.chars[i] == '\r') || (src.chars[i] == '\n'))
+				{
+					if((newEntry != 0) && (StringChars != 0))
+					{
+						newEntry->resource_offset = (u32)(StringChars - resource.memory);
+					}
+					
+					newEntry = 0;
+					StringChars = 0;
+					StringLen = 0;
+					
+				}
 			}
 			else if(src.chars[i] == '"')
 			{
@@ -450,4 +472,7 @@ assemble
 	header[0].len = (u64)(byte_code.end - byte_code.memory);
 	header[1].bytes = resource.memory;
 	header[1].len = (u64)(resource.end - resource.memory);
+	
+	clear_buffer(&patches);
+	Memory->end = patches.memory;
 }

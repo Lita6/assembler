@@ -197,25 +197,6 @@ struct debug_directory
 };
 #pragma pack(pop)
 
-u32
-AlignSize
-(u32 size, u32 align)
-{
-	u32 result = 0;
-	
-	u32 mod = size % align;
-	if(mod != 0)
-	{
-		result = size + (align - mod);
-	}
-	else
-	{
-		result = size;
-	}
-	
-	return(result);
-}
-
 int __stdcall
 WinMainCRTStartup
 (void)
