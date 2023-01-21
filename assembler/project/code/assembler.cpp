@@ -10,7 +10,7 @@
 *    ret
 *
 *    lea instruction based on rip
-*    - add lea instruction
+*    - resolve string patch properly
 *    - improve test's ability to support the resource section
 *    - improve assembler's ability to support the resource section
 *
@@ -43,6 +43,7 @@ enum list_entry_type
 	sub,
 	lea_left,
 	lea_right,
+	string_word,
 	reg,
 	imm,
 	string,
@@ -57,6 +58,19 @@ struct list_entry
 	u8 reg_address;
 	u64 imm_value;
 	u32 resource_offset;
+	list_entry *variable_entry;
+};
+
+struct Patch
+{
+	list_entry *variable_entry;
+	u8 *location;
+};
+
+struct Patch_Array
+{
+	Patch *start;
+	u32 count;
 };
 
 struct reserved_list
@@ -137,7 +151,7 @@ ReserveStrings
 	add_to_list(&Reserved_Strings, "r15", reg, size_64, 0, 15, 0);
 	
 	/* VARIABLE TYPES */
-	add_to_list(&Reserved_Strings, "string", string, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "string", string_word, 0, 0, 0, 0);
 }
 
 struct Instruction
@@ -178,7 +192,9 @@ assemble
 		*IsInitialized = TRUE;
 	}
 	
-	Buffer patches = create_buffer(Memory, 1024);
+	Buffer buffer_patches = create_buffer(Memory, 1024);
+	Patch_Array patches = {};
+	patches.start = (Patch *)buffer_patches.memory;
 	
 	Instruction instr = {};
 	b32 InstructionComplete = FALSE;
@@ -314,21 +330,24 @@ assemble
 					if(token == entry->name)
 					{
 						
-						if(entry->type == reg)
+						if((entry->type == reg) || (entry->type == string))
 						{
-							instr.operands[CurrentOperand++] = *entry;
+							instr.operands[CurrentOperand] = *entry;
+							instr.operands[CurrentOperand].variable_entry = entry;
+							CurrentOperand++;
 							if((CurrentOperand == 2) && (instr.operation.type != none))
 							{
 								InstructionComplete = TRUE;
 							}
 							
 						}
-						else if(entry->type == string)
+						else if(entry->type == string_word)
 						{
 							processVariableName = TRUE;
 							newEntry = (list_entry *)buffer_allocate(&Reserved_Strings.reserved, sizeof(list_entry));
 							Reserved_Strings.count++;
 							newEntry->type = string;
+							newEntry->size = size_32;
 						}
 						else
 						{
@@ -378,6 +397,21 @@ assemble
 						u8 reg_op = (u8)(instr.operation.opcode_extension & 0b0111);
 						u8 reg_mem = (u8)(instr.operands[0].reg_address & 0b0111);
 						modrm = (u8)(0xc0 | (reg_op << 3) | reg_mem);
+						useModrm = TRUE;
+						
+					}break;
+					
+					case lea_right:
+					{
+						swap_operands(&instr);
+					}; // NOTE: Fall through to lea_left.
+					case lea_left:
+					{
+						// 48 8d 0d 59 00 00 00
+						op_code = 0x8d;
+						
+						u8 reg_op = (u8)(instr.operands[0].reg_address & 0b0111);
+						modrm = (u8)(0x00 | (reg_op << 3) | 0b101);
 						useModrm = TRUE;
 						
 					}break;
@@ -434,8 +468,16 @@ assemble
 					buffer_append_u8(&byte_code, modrm);
 				}
 				
-				if(instr.operands[1].type == imm)
+				if((instr.operands[1].type == imm) || (instr.operands[1].type == string))
 				{
+					if(instr.operands[1].type == string)
+					{
+						Patch *new_patch = (Patch *)(buffer_allocate(&buffer_patches, sizeof(Patch)));
+						new_patch->location = byte_code.end;
+						new_patch->variable_entry = instr.operands[1].variable_entry;
+						patches.count++;
+					}
+					
 					if(instr.operands[1].size == size_8)
 					{
 						
@@ -473,6 +515,6 @@ assemble
 	header[1].bytes = resource.memory;
 	header[1].len = (u64)(resource.end - resource.memory);
 	
-	clear_buffer(&patches);
-	Memory->end = patches.memory;
+	clear_buffer(&buffer_patches);
+	Memory->end = buffer_patches.memory;
 }
