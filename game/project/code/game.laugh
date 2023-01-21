@@ -1,4 +1,8 @@
-155 -> r8
-r8 - 5
-r8 -> rax
+rsp - 40
+
+string winString "Hello, World!\0"
+winString &-> rcx
+
+rsp + 40
+0 -> rax
 ret

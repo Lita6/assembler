@@ -249,7 +249,8 @@ WinMainCRTStartup
 	Buffer Buffer_IDT  = win64_make_buffer(PAGE, PAGE_READWRITE);
 	Buffer Buffer_ILT  = win64_make_buffer(PAGE, PAGE_READWRITE);
 	
-	read_file_result Executable = Win64ReadEntireFile("D:\\Programming\\GitHub\\assembler\\HMH\\build\\win64_handmade.exe");
+	//read_file_result Executable = Win64ReadEntireFile("D:\\Programming\\GitHub\\assembler\\HMH\\build\\win64_handmade.exe");
+	read_file_result Executable = Win64ReadEntireFile("D:\\Programming\\GitHub\\assembler\\game\\build\\game.exe");
 	DWORD OldProtect = 0;
 	s32 ChangedProtection = VirtualProtect(Executable.Contents, Executable.ContentsSize, PAGE_READONLY, &OldProtect);
 	if(ChangedProtection == 0)

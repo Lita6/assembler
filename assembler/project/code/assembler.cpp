@@ -9,11 +9,6 @@
 *    rsp + STACK_ADJUST
 *    ret
 *
-*    lea instruction based on rip
-*    - resolve string patch properly
-*    - improve test's ability to support the resource section
-*    - improve assembler's ability to support the resource section
-*
 *    call a function pointer based on rip
 *    - window's loader is going to put the function address in my program
 *
@@ -57,7 +52,7 @@ struct list_entry
 	u8 opcode_extension;
 	u8 reg_address;
 	u64 imm_value;
-	u32 resource_offset;
+	s32 resource_offset;
 	list_entry *variable_entry;
 };
 
@@ -174,7 +169,6 @@ void
 assemble
 (Buffer *program, Buffer *Memory, String src, u32 PAGE)
 {
-	unreferenced(PAGE);
 	
 	U8_Array *header = (U8_Array *)(buffer_allocate(program, (2 * sizeof(U8_Array))));
 	Buffer byte_code = create_buffer(program, 64);
@@ -222,7 +216,7 @@ assemble
 				{
 					if((newEntry != 0) && (StringChars != 0))
 					{
-						newEntry->resource_offset = (u32)(StringChars - resource.memory);
+						newEntry->resource_offset = (s32)(StringChars - resource.memory);
 					}
 					
 					newEntry = 0;
@@ -508,6 +502,20 @@ assemble
 			CompleteToken = FALSE;
 			token = {};
 		}
+	}
+	
+	s32 code_section_size = (s32)AlignSize((u32)(byte_code.end - byte_code.memory), PAGE);
+	
+	for(u32 i = 0; i < patches.count; i++)
+	{
+		Patch *current_patch = &patches.start[i];
+		list_entry *var = current_patch->variable_entry;
+		
+		// NOTE: I cheated for now cause I know the rip-relative string patches are all 32 bit and are the only patches I have right now
+		s32 rip_relative = (code_section_size - (s32)((current_patch->location + var->size) - byte_code.memory)) + var->resource_offset;
+		
+		*((s32 *)current_patch->location) = rip_relative;
+		
 	}
 	
 	header[0].bytes = byte_code.memory;

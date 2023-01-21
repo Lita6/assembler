@@ -4,6 +4,8 @@
 
 global u32 PAGE;
 
+#define DATA_DIR_COUNT 16
+
 #define EXPORT        0
 #define IMPORT        1
 #define RESOURCE      2
@@ -219,25 +221,22 @@ WinMainCRTStartup
 	src.chars = (u8 *)file.Contents;
 	src.len = GetStringLength(src.chars);
 	
-	Buffer reserved = win64_make_buffer(PAGE, PAGE_READWRITE);
-	Buffer strings = win64_make_buffer(PAGE, PAGE_READWRITE);
-	init(&reserved, &strings);
-	
-	Buffer byte_code = win64_make_buffer(PAGE, PAGE_READWRITE);
-	assemble(&byte_code, src);
-	U8_Array *program_header = (U8_Array *)(byte_code.memory);
+	Buffer chunk_of_memory = win64_make_buffer(2*PAGE, PAGE_READWRITE);
+	Buffer assembled = win64_make_buffer(PAGE, PAGE_READWRITE);
+	assemble(&assembled, &chunk_of_memory, src, PAGE);
+	U8_Array *assembled_header = (U8_Array *)(assembled.memory);
 	
 	Buffer program = win64_make_buffer(PAGE, PAGE_READWRITE);
-	dos_header *dos = (dos_header *)program.memory;
+	dos_header *dos = (dos_header *)(buffer_allocate(&program, sizeof(dos_header)));
 	dos->signature[0] = 'M';
 	dos->signature[1] = 'Z';
 	dos->e_lfanew = sizeof(dos_header);
 	
-	coff_header *coff = (coff_header *)(program.memory + dos->e_lfanew);
+	coff_header *coff = (coff_header *)(buffer_allocate(&program, sizeof(coff_header)));
 	coff->PESignature[0] = 'P';
 	coff->PESignature[1] = 'E';
 	coff->machine = 0x8664; // NOTE: AMD64
-	coff->numberOfSections = 1;
+	coff->numberOfSections = (u16)((assembled_header[1].len > 0) ? 2 : 1);
 	
 	// NOTE: filetime is in 100 nanoseconds
 	FILETIME filetime = {};
@@ -245,18 +244,18 @@ WinMainCRTStartup
 	u64 time = ((u64)filetime.dwHighDateTime << 32) | ((u64)filetime.dwLowDateTime);
 	time = time/(u64)10000000; // Convert to seconds
 	coff->timeDateStamp = (u32)time; // Only preserve the low order bits per the docs
-	coff->sizeOfOptionalHeader = sizeof(pe_opt_header) + sizeof(coff_extension) + (sizeof(data_directory) * 16);
+	coff->sizeOfOptionalHeader = sizeof(pe_opt_header) + sizeof(coff_extension) + (sizeof(data_directory) * DATA_DIR_COUNT);
 	coff->characteristics = IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LARGE_ADDRESS_AWARE | IMAGE_FILE_DEBUG_STRIPPED;
 	
-	pe_opt_header *optionalHeader = (pe_opt_header *)((u8 *)coff + sizeof(coff_header));
+	pe_opt_header *optionalHeader = (pe_opt_header *)(buffer_allocate(&program, sizeof(pe_opt_header)));
 	optionalHeader->Format = 0x20b; // NOTE: To indicate a PE32+ format
-	optionalHeader->SizeOfCode = (u32)(program_header[0].len);
+	optionalHeader->SizeOfCode = (u32)(assembled_header[0].len);
 	
 	// NOTE: byte code is the first section and PAGE is the section alignment
 	optionalHeader->AddressOfEntryPoint = 1 * PAGE; // NOTE: main starts at the top
 	optionalHeader->BaseOfCode = 1 * PAGE;
 	
-	coff_extension *extension = (coff_extension *)((u8 *)optionalHeader + sizeof(pe_opt_header));
+	coff_extension *extension = (coff_extension *)(buffer_allocate(&program, sizeof(coff_extension)));
 	extension->ImageBase = 0x00400000; // NOTE: docs say this is the default for an exe
 	extension->SectionAlignment = PAGE;
 	extension->FileAlignment = 512; // NOTE: docs say this is the default
@@ -265,7 +264,6 @@ WinMainCRTStartup
 	extension->MinorOSVersion = 2;
 	extension->MajorSubsystemVersion = 5;
 	extension->MinorSubsystemVersion = 2;
-	extension->SizeOfImage = extension->SectionAlignment * (coff->numberOfSections + 1);
 	
 	u32 headerSize = sizeof(dos_header) + sizeof(coff_header) + coff->sizeOfOptionalHeader + (sizeof(image_section_header) * coff->numberOfSections);
 	extension->SizeOfHeaders = AlignSize(headerSize, extension->FileAlignment);
@@ -282,29 +280,79 @@ WinMainCRTStartup
 	extension->SizeOfStackCommit = 0x100000;
 	extension->NumberOfRvaAndSizes = 16;
 	
-	image_section_header *sectionHeader = (image_section_header *)((u8 *)optionalHeader + coff->sizeOfOptionalHeader);
-	sectionHeader->Name[0] = '.';
-	sectionHeader->Name[1] = 't';
-	sectionHeader->Name[2] = 'e';
-	sectionHeader->Name[3] = 'x';
-	sectionHeader->Name[4] = 't';
-	sectionHeader->VirtualSize = optionalHeader->SizeOfCode;
-	sectionHeader->VirtualAddress = extension->SectionAlignment;
-	sectionHeader->SizeOfRawData = AlignSize(optionalHeader->SizeOfCode, extension->FileAlignment);
-	sectionHeader->PointerToRawData = extension->SizeOfHeaders;
-	sectionHeader->Characteristics = 
+	data_directory *data_dirs = (data_directory *)buffer_allocate(&program, (sizeof(data_directory) * DATA_DIR_COUNT));
+	unreferenced(data_dirs);
+	
+	image_section_header *CodeSectionHeader = (image_section_header *)(buffer_allocate(&program, sizeof(image_section_header)));
+	CodeSectionHeader->Name[0] = '.';
+	CodeSectionHeader->Name[1] = 't';
+	CodeSectionHeader->Name[2] = 'e';
+	CodeSectionHeader->Name[3] = 'x';
+	CodeSectionHeader->Name[4] = 't';
+	CodeSectionHeader->VirtualSize = optionalHeader->SizeOfCode;
+	CodeSectionHeader->SizeOfRawData = AlignSize(optionalHeader->SizeOfCode, extension->FileAlignment);
+	CodeSectionHeader->PointerToRawData = extension->SizeOfHeaders;
+	CodeSectionHeader->Characteristics = 
 		IMAGE_SCN_CNT_CODE |
 		IMAGE_SCN_MEM_EXECUTE |
 		IMAGE_SCN_MEM_READ;
 	
-	u8 *TextSection = program.memory + sectionHeader->PointerToRawData;
-	
-	for(u32 i = 0; i < optionalHeader->SizeOfCode; i++)
+	image_section_header *RDataSectionHeader = 0;
+	if(assembled_header[1].len != 0)
 	{
-		TextSection[i] = program_header[0].bytes[i];
+		RDataSectionHeader = (image_section_header *)(buffer_allocate(&program, sizeof(image_section_header)));
+		RDataSectionHeader->Name[0] = '.';
+		RDataSectionHeader->Name[1] = 'r';
+		RDataSectionHeader->Name[2] = 'd';
+		RDataSectionHeader->Name[3] = 'a';
+		RDataSectionHeader->Name[4] = 't';
+		RDataSectionHeader->Name[5] = 'a';
+		RDataSectionHeader->VirtualSize = (u32)assembled_header[1].len;
+		RDataSectionHeader->SizeOfRawData = AlignSize((u32)assembled_header[1].len, extension->FileAlignment);
+		RDataSectionHeader->PointerToRawData = CodeSectionHeader->PointerToRawData + CodeSectionHeader->SizeOfRawData;
+		RDataSectionHeader->Characteristics = 
+			IMAGE_SCN_CNT_INITIALIZED_DATA |
+			IMAGE_SCN_MEM_READ;
 	}
 	
-	u32 programSize = sectionHeader->PointerToRawData + sectionHeader->SizeOfRawData;
+	u32 headers_size = (u32)(program.end - program.memory);
+	u32 needed_size_adjustment = extension->SizeOfHeaders - headers_size;
+	if(needed_size_adjustment > 0)
+	{
+		buffer_allocate(&program, needed_size_adjustment);
+	}
+	
+	u32 virtual_aligned_header = AlignSize(extension->SizeOfHeaders, extension->SectionAlignment);
+	CodeSectionHeader->VirtualAddress = virtual_aligned_header;
+	
+	extension->SizeOfImage = virtual_aligned_header;
+	u32 code_virtual_size = AlignSize(CodeSectionHeader->SizeOfRawData, extension->SectionAlignment);
+	extension->SizeOfImage += code_virtual_size;
+	if(RDataSectionHeader != 0)
+	{
+		extension->SizeOfImage += AlignSize(RDataSectionHeader->SizeOfRawData, extension->SectionAlignment);
+		
+		RDataSectionHeader->VirtualAddress = CodeSectionHeader->VirtualAddress + code_virtual_size;
+	}
+	
+	u8 *TextSection = buffer_allocate(&program, CodeSectionHeader->SizeOfRawData);
+	
+	for(u32 i = 0; i < assembled_header[0].len; i++)
+	{
+		TextSection[i] = assembled_header[0].bytes[i];
+	}
+	
+	if(RDataSectionHeader != 0)
+	{
+		u8 *RDataSection = buffer_allocate(&program, RDataSectionHeader->SizeOfRawData);
+		
+		for(u32 i = 0; i < assembled_header[1].len; i++)
+		{
+			RDataSection[i] = assembled_header[1].bytes[i];
+		}
+	}
+	
+	u32 programSize = (u32)(program.end - program.memory);
 	b32 writeSucceded = Win64WriteEntireFile((char *)outputName.chars, programSize, (void *)program.memory);
 	unreferenced(writeSucceded);
 	
