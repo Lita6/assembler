@@ -1,16 +1,12 @@
 /* TODO: There's a few things to do to get my program somewhere that can call
 *        a windows function
 *
-	*    HMODULE kernell32 = LoadLibraryA("KERNELL32.dll");
-	*    fn func = (fn)GetProcAddress(kernell32, "OutputDebugStringA");
-	*    func("This is the first thing we have printed.\n");
-	*
 *    rsp - STACK_ADJUST
-*    kernell32_name &-> rcx
+*    kernel32_name &-> rcx
 *    call LoadLibraryA
-*    kernell32 <- rax // so kernell32 goes on the stack
+*    u64 kernel32 <- rax // so kernel32 goes on the stack
 *    string output_name "OutputDebugStringA\0"
-*    rcx <- kernell32
+*    rcx <- kernel32
 *    output_name &-> rdx
 *    call GetProcAddress
 *    winDebugString <- rax
@@ -21,11 +17,12 @@
 *    rsp + STACK_ADJUST
 *    ret
 *
-*    call a function pointer based on rip
-*    - window's loader is going to put the function address in my program
-*
-*    - implement variables
-*      - variable to keep track of stack adjustment amount
+*    implement variables
+*    - variable to keep track of stack adjustment amount
+*      - so I'll need to create a reserved string for it
+*      - when a new variable is created, need to add to it and save the rsp offset
+*    - reg to memory move
+*    - memory to reg move
 */
 
 #include "win64_assembler.h"
@@ -50,11 +47,14 @@ enum list_entry_type
 	sub,
 	lea_left,
 	lea_right,
+	call,
 	string_word,
+	u64_word,
 	reg,
 	imm,
 	string,
 	import_function,
+	u64_type,
 };
 
 struct list_entry
@@ -123,6 +123,7 @@ ReserveStrings
 	add_to_list(&Reserved_Strings, "-", sub, 0, 0b101, 0, 0, 0);
 	add_to_list(&Reserved_Strings, "<-&", lea_left, 0, 0, 0, 0, 0);
 	add_to_list(&Reserved_Strings, "&->", lea_right, 0, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "call", call, 0, 0b010, 0, 0, 0);
 	
 	/* REGISTERS */
 	add_to_list(&Reserved_Strings, "eax", reg, size_32, 0, 0, 0, 0);
@@ -163,6 +164,7 @@ ReserveStrings
 	
 	/* VARIABLE TYPES */
 	add_to_list(&Reserved_Strings, "string", string_word, 0, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "u64", u64_word, 0, 0, 0, 0, 0);
 }
 
 struct Instruction
@@ -198,6 +200,10 @@ StuffStringIntoArray
 	}
 }
 
+#define KERNEL32_NAME_LEN 14
+#define LOADLIBRARY_NAME_LEN 14
+#define GETPROC_NAME_LEN 16
+
 #pragma pack(push, 1)
 struct Import_Data_Table
 {
@@ -217,11 +223,11 @@ struct Import_Data_Table
 	u32 forwarderChain_null;
 	u32 nameRVA_null;
 	u32 IAT_RVA_null;
-	u8 kernell32_name[14];
+	u8 kernel32_name[KERNEL32_NAME_LEN];
 	u16 loadlibrary_hint;
-	u8 loadlibrary_name[14];
+	u8 loadlibrary_name[LOADLIBRARY_NAME_LEN];
 	u16 getproc_hint;
-	u8 getproc_name[16];
+	u8 getproc_name[GETPROC_NAME_LEN];
 };
 #pragma pack(pop)
 
@@ -238,8 +244,8 @@ assemble
 	u32 loadlibrary_offset = (u32)((u8 *)(&import_table->load_lib_address) - resource.memory);
 	
 	import_table->ILT_RVA = (u32)((u8 *)(&import_table->load_lib_lookup) - resource.memory) + PAGE*2;
-	u32 kernell32_name_offset = (u32)(import_table->kernell32_name - resource.memory);
-	import_table->nameRVA = kernell32_name_offset + PAGE*2;
+	u32 kernel32_name_offset = (u32)(import_table->kernel32_name - resource.memory);
+	import_table->nameRVA = kernel32_name_offset + PAGE*2;
 	import_table->IAT_RVA = loadlibrary_offset + PAGE*2;
 	
 	u32 loadlibrary_RVA = (u32)((u8 *)(&import_table->loadlibrary_hint) - resource.memory) + PAGE*2;
@@ -248,10 +254,11 @@ assemble
 	u32 getproc_RVA = (u32)((u8 *)(&import_table->getproc_hint) - resource.memory) + PAGE*2;
 	import_table->get_proc_address = import_table->get_proc_lookup = getproc_RVA;
 	
-	StuffStringIntoArray(import_table->kernell32_name, "KERNELL32.dll", (u32)14);
-	StuffStringIntoArray(import_table->loadlibrary_name, "LoadLibraryA", (u32)14);
-	StuffStringIntoArray(import_table->getproc_name, "GetProcAddress", (u32)16);
+	StuffStringIntoArray(import_table->kernel32_name, "KERNEL32.dll", KERNEL32_NAME_LEN);
+	StuffStringIntoArray(import_table->loadlibrary_name, "LoadLibraryA", LOADLIBRARY_NAME_LEN);
+	StuffStringIntoArray(import_table->getproc_name, "GetProcAddress", GETPROC_NAME_LEN);
 	
+	list_entry *stack_entry = 0;
 	b8 *IsInitialized = (b8 *)Memory->memory;
 	if(*IsInitialized == FALSE)
 	{
@@ -262,12 +269,20 @@ assemble
 		Reserved_Strings.reserved = create_buffer(Memory, 1024*3);
 		ReserveStrings();
 		
-		add_to_list(&Reserved_Strings, "kernell32_name", string, 0, 0, 0, (s32)kernell32_name_offset, 0);
-		add_to_list(&Reserved_Strings, "LoadLibraryA", import_function, 0, 0, 0, (s32)loadlibrary_offset, 0);
-		add_to_list(&Reserved_Strings, "GetProcAddress", import_function, 0, 0, 0, (s32)((u8 *)(&import_table->get_proc_address) - resource.memory), 0);
+		add_to_list(&Reserved_Strings, "kernel32_name", string, size_32, 0, 0, (s32)kernel32_name_offset, 0);
+		add_to_list(&Reserved_Strings, "LoadLibraryA", import_function, size_32, 0, 0, (s32)loadlibrary_offset, 0);
+		add_to_list(&Reserved_Strings, "GetProcAddress", import_function, size_32, 0, 0, (s32)((u8 *)(&import_table->get_proc_address) - resource.memory), 0);
+		
+		stack_entry = &Reserved_Strings.start[Reserved_Strings.count];
+		add_to_list(&Reserved_Strings, "STACK_ADJUST", imm, size_8, 0, 0, 0, 0);
 		
 		*IsInitialized = TRUE;
 	}
+	
+	// NOTE: Need to reset stack_entry->imm_value every time for testing
+	u64 return_address_size = size_64;
+	u64 shadow_stack_size = (u64)(size_64 * 4);
+	stack_entry->imm_value = return_address_size + shadow_stack_size;
 	
 	Buffer buffer_patches = create_buffer(Memory, 1024);
 	Patch_Array patches = {};
@@ -297,15 +312,17 @@ assemble
 				
 				if((src.chars[i] == '\r') || (src.chars[i] == '\n'))
 				{
-					if((newEntry != 0) && (StringChars != 0))
+					if(newEntry != 0)
 					{
-						newEntry->resource_offset = (s32)(StringChars - resource.memory);
+						if(StringChars != 0)
+						{
+							newEntry->resource_offset = (s32)(StringChars - resource.memory);
+							StringChars = 0;
+							StringLen = 0;
+						}
+						
+						newEntry = 0;
 					}
-					
-					newEntry = 0;
-					StringChars = 0;
-					StringLen = 0;
-					
 				}
 			}
 			else if(src.chars[i] == '"')
@@ -407,24 +424,34 @@ assemble
 					if(token == entry->name)
 					{
 						
-						if((entry->type == reg) || (entry->type == string))
+						if((entry->type == reg) || (entry->type == string) || (entry->type == import_function))
 						{
 							instr.operands[CurrentOperand] = *entry;
 							instr.operands[CurrentOperand].variable_entry = entry;
 							CurrentOperand++;
-							if((CurrentOperand == 2) && (instr.operation.type != none))
+							if(((CurrentOperand == 2) || (entry->type == import_function)) && (instr.operation.type != none))
 							{
 								InstructionComplete = TRUE;
 							}
 							
 						}
-						else if(entry->type == string_word)
+						else if((entry->type == string_word) || (entry->type == u64_word))
 						{
 							processVariableName = TRUE;
 							newEntry = (list_entry *)buffer_allocate(&Reserved_Strings.reserved, sizeof(list_entry));
 							Reserved_Strings.count++;
-							newEntry->type = string;
-							newEntry->size = size_32;
+							
+							if(entry->type == string_word)
+							{
+								newEntry->type = string;
+								newEntry->size = size_32;
+							}
+							else if(entry->type == u64_word)
+							{
+								newEntry->type = u64_type;
+								newEntry->size = size_64;
+							}
+							
 						}
 						else
 						{
@@ -440,6 +467,8 @@ assemble
 						break;
 					}
 				}
+				
+				
 			}
 			
 			if(InstructionComplete == TRUE)
@@ -452,8 +481,16 @@ assemble
 				{
 				  case ret:
 					{
-						
 						op_code = 0xc3;
+					}break;
+					
+				  case call:
+					{
+						op_code = 0xff;
+						
+						useModrm = TRUE;
+						modrm = (u8)(0x00 | (instr.operation.opcode_extension << 3) | 0b101);
+						
 					}break;
 					
 					case sub:
@@ -519,7 +556,7 @@ assemble
 				}
 				
 				u8 rex = 0;
-				if((instr.operands[0].size == sizeof(u64)) || (instr.operands[1].size == sizeof(u64)))
+				if((instr.operands[0].size == size_64) || (instr.operands[1].size == size_64))
 				{
 					rex = REX | REX_W;
 				}
@@ -545,9 +582,14 @@ assemble
 					buffer_append_u8(&byte_code, modrm);
 				}
 				
-				if((instr.operands[1].type == imm) || (instr.operands[1].type == string))
+				if(instr.operands[0].type == import_function)
 				{
-					if(instr.operands[1].type == string)
+					instr.operands[1] = instr.operands[0];
+				}
+				
+				if((instr.operands[1].type == imm) || (instr.operands[1].type == string) || (instr.operands[1].type == import_function))
+				{
+					if((instr.operands[1].type == string) || (instr.operands[1].type == import_function))
 					{
 						Patch *new_patch = (Patch *)(buffer_allocate(&buffer_patches, sizeof(Patch)));
 						new_patch->location = byte_code.end;
@@ -594,7 +636,7 @@ assemble
 		Patch *current_patch = &patches.start[i];
 		list_entry *var = current_patch->variable_entry;
 		
-		// NOTE: I cheated for now cause I know the rip-relative string patches are all 32 bit and are the only patches I have right now
+		// NOTE: I cheated for now cause I know the rip-relative patches are all 32 bit and are the only patches I have right now
 		s32 rip_relative = (code_section_size - (s32)((current_patch->location + var->size) - byte_code.memory)) + var->resource_offset;
 		
 		*((s32 *)current_patch->location) = rip_relative;

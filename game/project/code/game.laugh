@@ -1,5 +1,9 @@
 rsp - 40
 
+kernel32_name &-> rcx
+call LoadLibraryA
+u64 kernel32
+
 string winString "Hello, World!\0"
 winString &-> rcx
 

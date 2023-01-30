@@ -350,6 +350,10 @@ WinMainCRTStartup
 		{
 			RDataSection[i] = assembled_header[1].bytes[i];
 		}
+		
+		Import_Data_Table *import_info = (Import_Data_Table *)RDataSection;
+		data_dirs[IMPORT].VirtualAddress = (u32)((u8 *)&import_info->ILT_RVA - RDataSection) + RDataSectionHeader->VirtualAddress;
+		data_dirs[IMPORT].Size = sizeof(import_directory_table) * 2; // Null terminated list
 	}
 	
 	u32 programSize = (u32)(program.end - program.memory);
