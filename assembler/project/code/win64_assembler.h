@@ -294,21 +294,6 @@ GetStringLength
 	return(result);
 }
 
-#if 0
-b32
-IsLetter
-(u8 ch)
-{
-	
-	b32 result = FALSE;
-	if(((ch >= 'a') && (ch <= 'z')) || ((ch >= 'A') && (ch <= 'Z')))
-	{
-		result = TRUE;
-	}
-	return(result);
-}
-#endif
-
 b32
 IsNumber
 (String string)

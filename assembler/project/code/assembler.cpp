@@ -1,10 +1,22 @@
 /* TODO: There's a few things to do to get my program somewhere that can call
 *        a windows function
 *
+	*    HMODULE kernell32 = LoadLibraryA("KERNELL32.dll");
+	*    fn func = (fn)GetProcAddress(kernell32, "OutputDebugStringA");
+	*    func("This is the first thing we have printed.\n");
+	*
 *    rsp - STACK_ADJUST
+*    kernell32_name &-> rcx
+*    call LoadLibraryA
+*    kernell32 <- rax // so kernell32 goes on the stack
+*    string output_name "OutputDebugStringA\0"
+*    rcx <- kernell32
+*    output_name &-> rdx
+*    call GetProcAddress
+*    winDebugString <- rax
 *    string winString "Hello, World!\0"
 *    winString &-> rcx
-*    call kernell32.dll:OutputDebugStringA
+*    call winDebugString
 *    eax <- 0
 *    rsp + STACK_ADJUST
 *    ret
@@ -42,6 +54,7 @@ enum list_entry_type
 	reg,
 	imm,
 	string,
+	import_function,
 };
 
 struct list_entry
@@ -78,17 +91,20 @@ struct reserved_list
 
 void
 add_to_list
-(reserved_list *list, char *str, list_entry_type type, u8 size, u8 opcode_extension, u8 reg_address, u64 imm_value)
+(reserved_list *list, char *str, list_entry_type type, u8 size, u8 opcode_extension, u8 reg_address, s32 resource_offset, u64 imm_value)
 {
 	
 	list_entry *temp = (list_entry *)buffer_allocate(&list->reserved, sizeof(list_entry));
 	list->count++;
+	
 	temp->name = create_string(&list->strings, str);
 	temp->type = type;
 	temp->size = size;
 	temp->opcode_extension = opcode_extension;
 	temp->reg_address = reg_address;
 	temp->imm_value = imm_value;
+	temp->resource_offset = resource_offset;
+	
 }
 
 global reserved_list Reserved_Strings;
@@ -100,53 +116,53 @@ ReserveStrings
 	Reserved_Strings.start = (list_entry *)Reserved_Strings.reserved.memory;
 	
 	/* OPCODES */
-	add_to_list(&Reserved_Strings, "->", mov_right, 0, 0, 0, 0);
-	add_to_list(&Reserved_Strings, "<-", mov_left, 0, 0, 0, 0);
-	add_to_list(&Reserved_Strings, "ret", ret, 0, 0, 0, 0);
-	add_to_list(&Reserved_Strings, "+", add, 0, 0, 0, 0);
-	add_to_list(&Reserved_Strings, "-", sub, 0, 0b101, 0, 0);
-	add_to_list(&Reserved_Strings, "<-&", lea_left, 0, 0, 0, 0);
-	add_to_list(&Reserved_Strings, "&->", lea_right, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "->", mov_right, 0, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "<-", mov_left, 0, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "ret", ret, 0, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "+", add, 0, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "-", sub, 0, 0b101, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "<-&", lea_left, 0, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "&->", lea_right, 0, 0, 0, 0, 0);
 	
 	/* REGISTERS */
-	add_to_list(&Reserved_Strings, "eax", reg, size_32, 0, 0, 0);
-	add_to_list(&Reserved_Strings, "ecx", reg, size_32, 0, 1, 0);
-	add_to_list(&Reserved_Strings, "edx", reg, size_32, 0, 2, 0);
-	add_to_list(&Reserved_Strings, "ebx", reg, size_32, 0, 3, 0);
-	add_to_list(&Reserved_Strings, "esp", reg, size_32, 0, 4, 0);
-	add_to_list(&Reserved_Strings, "ebp", reg, size_32, 0, 5, 0);
-	add_to_list(&Reserved_Strings, "esi", reg, size_32, 0, 6, 0);
-	add_to_list(&Reserved_Strings, "edi", reg, size_32, 0, 7, 0);
+	add_to_list(&Reserved_Strings, "eax", reg, size_32, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "ecx", reg, size_32, 0, 1, 0, 0);
+	add_to_list(&Reserved_Strings, "edx", reg, size_32, 0, 2, 0, 0);
+	add_to_list(&Reserved_Strings, "ebx", reg, size_32, 0, 3, 0, 0);
+	add_to_list(&Reserved_Strings, "esp", reg, size_32, 0, 4, 0, 0);
+	add_to_list(&Reserved_Strings, "ebp", reg, size_32, 0, 5, 0, 0);
+	add_to_list(&Reserved_Strings, "esi", reg, size_32, 0, 6, 0, 0);
+	add_to_list(&Reserved_Strings, "edi", reg, size_32, 0, 7, 0, 0);
 	
-	add_to_list(&Reserved_Strings, "r8d", reg, size_32, 0, 8, 0);
-	add_to_list(&Reserved_Strings, "r9d", reg, size_32, 0, 9, 0);
-	add_to_list(&Reserved_Strings, "r10d", reg, size_32, 0, 10, 0);
-	add_to_list(&Reserved_Strings, "r11d", reg, size_32, 0, 11, 0);
-	add_to_list(&Reserved_Strings, "r12d", reg, size_32, 0, 12, 0);
-	add_to_list(&Reserved_Strings, "r13d", reg, size_32, 0, 13, 0);
-	add_to_list(&Reserved_Strings, "r14d", reg, size_32, 0, 14, 0);
-	add_to_list(&Reserved_Strings, "r15d", reg, size_32, 0, 15, 0);
+	add_to_list(&Reserved_Strings, "r8d", reg, size_32, 0, 8, 0, 0);
+	add_to_list(&Reserved_Strings, "r9d", reg, size_32, 0, 9, 0, 0);
+	add_to_list(&Reserved_Strings, "r10d", reg, size_32, 0, 10, 0, 0);
+	add_to_list(&Reserved_Strings, "r11d", reg, size_32, 0, 11, 0, 0);
+	add_to_list(&Reserved_Strings, "r12d", reg, size_32, 0, 12, 0, 0);
+	add_to_list(&Reserved_Strings, "r13d", reg, size_32, 0, 13, 0, 0);
+	add_to_list(&Reserved_Strings, "r14d", reg, size_32, 0, 14, 0, 0);
+	add_to_list(&Reserved_Strings, "r15d", reg, size_32, 0, 15, 0, 0);
 	
-	add_to_list(&Reserved_Strings, "rax", reg, size_64, 0, 0, 0);
-	add_to_list(&Reserved_Strings, "rcx", reg, size_64, 0, 1, 0);
-	add_to_list(&Reserved_Strings, "rdx", reg, size_64, 0, 2, 0);
-	add_to_list(&Reserved_Strings, "rbx", reg, size_64, 0, 3, 0);
-	add_to_list(&Reserved_Strings, "rsp", reg, size_64, 0, 4, 0);
-	add_to_list(&Reserved_Strings, "rbp", reg, size_64, 0, 5, 0);
-	add_to_list(&Reserved_Strings, "rsi", reg, size_64, 0, 6, 0);
-	add_to_list(&Reserved_Strings, "rdi", reg, size_64, 0, 7, 0);
+	add_to_list(&Reserved_Strings, "rax", reg, size_64, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "rcx", reg, size_64, 0, 1, 0, 0);
+	add_to_list(&Reserved_Strings, "rdx", reg, size_64, 0, 2, 0, 0);
+	add_to_list(&Reserved_Strings, "rbx", reg, size_64, 0, 3, 0, 0);
+	add_to_list(&Reserved_Strings, "rsp", reg, size_64, 0, 4, 0, 0);
+	add_to_list(&Reserved_Strings, "rbp", reg, size_64, 0, 5, 0, 0);
+	add_to_list(&Reserved_Strings, "rsi", reg, size_64, 0, 6, 0, 0);
+	add_to_list(&Reserved_Strings, "rdi", reg, size_64, 0, 7, 0, 0);
 	
-	add_to_list(&Reserved_Strings, "r8", reg, size_64, 0, 8, 0);
-	add_to_list(&Reserved_Strings, "r9", reg, size_64, 0, 9, 0);
-	add_to_list(&Reserved_Strings, "r10", reg, size_64, 0, 10, 0);
-	add_to_list(&Reserved_Strings, "r11", reg, size_64, 0, 11, 0);
-	add_to_list(&Reserved_Strings, "r12", reg, size_64, 0, 12, 0);
-	add_to_list(&Reserved_Strings, "r13", reg, size_64, 0, 13, 0);
-	add_to_list(&Reserved_Strings, "r14", reg, size_64, 0, 14, 0);
-	add_to_list(&Reserved_Strings, "r15", reg, size_64, 0, 15, 0);
+	add_to_list(&Reserved_Strings, "r8", reg, size_64, 0, 8, 0, 0);
+	add_to_list(&Reserved_Strings, "r9", reg, size_64, 0, 9, 0, 0);
+	add_to_list(&Reserved_Strings, "r10", reg, size_64, 0, 10, 0, 0);
+	add_to_list(&Reserved_Strings, "r11", reg, size_64, 0, 11, 0, 0);
+	add_to_list(&Reserved_Strings, "r12", reg, size_64, 0, 12, 0, 0);
+	add_to_list(&Reserved_Strings, "r13", reg, size_64, 0, 13, 0, 0);
+	add_to_list(&Reserved_Strings, "r14", reg, size_64, 0, 14, 0, 0);
+	add_to_list(&Reserved_Strings, "r15", reg, size_64, 0, 15, 0, 0);
 	
 	/* VARIABLE TYPES */
-	add_to_list(&Reserved_Strings, "string", string_word, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "string", string_word, 0, 0, 0, 0, 0);
 }
 
 struct Instruction
@@ -166,13 +182,75 @@ swap_operands
 }
 
 void
+StuffStringIntoArray
+(u8 *array, char *str, u32 len)
+{
+	
+	u8 *index = (u8 *)str;
+	for(u32 i = 0; i < len; i++)
+	{
+		if(index[i] == 0)
+		{
+			break;
+		}
+		
+		array[i] = index[i];
+	}
+}
+
+#pragma pack(push, 1)
+struct Import_Data_Table
+{
+	u64 load_lib_address;
+	u64 get_proc_address;
+	u64 iat_null;
+	u64 load_lib_lookup;
+	u64 get_proc_lookup;
+	u64 ilt_null;
+	u32 ILT_RVA;
+	u32 timeStamp;
+	u32 forwarderChain;
+	u32 nameRVA;
+	u32 IAT_RVA;
+	u32 ILT_RVA_null;
+	u32 timeStamp_null;
+	u32 forwarderChain_null;
+	u32 nameRVA_null;
+	u32 IAT_RVA_null;
+	u8 kernell32_name[14];
+	u16 loadlibrary_hint;
+	u8 loadlibrary_name[14];
+	u16 getproc_hint;
+	u8 getproc_name[16];
+};
+#pragma pack(pop)
+
+void
 assemble
 (Buffer *program, Buffer *Memory, String src, u32 PAGE)
 {
 	
 	U8_Array *header = (U8_Array *)(buffer_allocate(program, (2 * sizeof(U8_Array))));
 	Buffer byte_code = create_buffer(program, 64);
-	Buffer resource = create_buffer(program, 64);
+	Buffer resource = create_buffer(program, 200);
+	Import_Data_Table *import_table = (Import_Data_Table *)(buffer_allocate(&resource, sizeof(Import_Data_Table)));
+	
+	u32 loadlibrary_offset = (u32)((u8 *)(&import_table->load_lib_address) - resource.memory);
+	
+	import_table->ILT_RVA = (u32)((u8 *)(&import_table->load_lib_lookup) - resource.memory) + PAGE*2;
+	u32 kernell32_name_offset = (u32)(import_table->kernell32_name - resource.memory);
+	import_table->nameRVA = kernell32_name_offset + PAGE*2;
+	import_table->IAT_RVA = loadlibrary_offset + PAGE*2;
+	
+	u32 loadlibrary_RVA = (u32)((u8 *)(&import_table->loadlibrary_hint) - resource.memory) + PAGE*2;
+	import_table->load_lib_address = import_table->load_lib_lookup = loadlibrary_RVA;
+	
+	u32 getproc_RVA = (u32)((u8 *)(&import_table->getproc_hint) - resource.memory) + PAGE*2;
+	import_table->get_proc_address = import_table->get_proc_lookup = getproc_RVA;
+	
+	StuffStringIntoArray(import_table->kernell32_name, "KERNELL32.dll", (u32)14);
+	StuffStringIntoArray(import_table->loadlibrary_name, "LoadLibraryA", (u32)14);
+	StuffStringIntoArray(import_table->getproc_name, "GetProcAddress", (u32)16);
 	
 	b8 *IsInitialized = (b8 *)Memory->memory;
 	if(*IsInitialized == FALSE)
@@ -183,6 +261,11 @@ assemble
 		Reserved_Strings.strings = create_buffer(Memory, 1024);
 		Reserved_Strings.reserved = create_buffer(Memory, 1024*3);
 		ReserveStrings();
+		
+		add_to_list(&Reserved_Strings, "kernell32_name", string, 0, 0, 0, (s32)kernell32_name_offset, 0);
+		add_to_list(&Reserved_Strings, "LoadLibraryA", import_function, 0, 0, 0, (s32)loadlibrary_offset, 0);
+		add_to_list(&Reserved_Strings, "GetProcAddress", import_function, 0, 0, 0, (s32)((u8 *)(&import_table->get_proc_address) - resource.memory), 0);
+		
 		*IsInitialized = TRUE;
 	}
 	
