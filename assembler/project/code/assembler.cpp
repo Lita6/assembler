@@ -13,7 +13,24 @@
 *    string winString "Hello, World!\0"
 *    winString &-> rcx
 *    call winDebugString
-*    eax <- 0
+*    rax <- 0
+*    rsp + STACK_ADJUST
+*    ret
+*
+*    rsp - STACK_ADJUST
+*    [rip + kernel32_name] &-> rcx
+*    call [rip + LoadLibraryA]
+*    8bits kernel32
+*    string output_name "OutputDebugStringA\0"
+*    rcx <- [rsp + kernel32]
+*    [rip + output_name] &-> rdx
+*    call [rip + GetProcAddress]
+*    8bits winDebugString
+*    [rsp + winDebugString] <- rax
+*    string winString "Hello, World!\0"
+*    [rip + winString] &-> rcx
+*    call [rsp + winDebugString]
+*    rax <- 0
 *    rsp + STACK_ADJUST
 *    ret
 *
@@ -22,6 +39,8 @@
 *      - so I'll need to create a reserved string for it
 *      - when a new variable is created, need to add to it and save the rsp offset
 *    - reg to memory move
+*      - rax *<- rcx
+*      - [rax] <- rcx
 *    - memory to reg move
 */
 
@@ -60,13 +79,14 @@ enum list_entry_type
 struct list_entry
 {
 	list_entry_type type;
+	list_entry *variable_entry;
 	String name;
 	u8 size;
 	u8 opcode_extension;
 	u8 reg_address;
 	u64 imm_value;
 	s32 resource_offset;
-	list_entry *variable_entry;
+	u8 stack_offset;
 };
 
 struct Patch
@@ -272,14 +292,13 @@ assemble
 		add_to_list(&Reserved_Strings, "kernel32_name", string, size_32, 0, 0, (s32)kernel32_name_offset, 0);
 		add_to_list(&Reserved_Strings, "LoadLibraryA", import_function, size_32, 0, 0, (s32)loadlibrary_offset, 0);
 		add_to_list(&Reserved_Strings, "GetProcAddress", import_function, size_32, 0, 0, (s32)((u8 *)(&import_table->get_proc_address) - resource.memory), 0);
-		
-		stack_entry = &Reserved_Strings.start[Reserved_Strings.count];
 		add_to_list(&Reserved_Strings, "STACK_ADJUST", imm, size_8, 0, 0, 0, 0);
 		
 		*IsInitialized = TRUE;
 	}
 	
-	// NOTE: Need to reset stack_entry->imm_value every time for testing
+	// NOTE: Need to reset stack_entry every time for testing
+	stack_entry = &Reserved_Strings.start[(Reserved_Strings.count-1)];
 	u64 return_address_size = size_64;
 	u64 shadow_stack_size = (u64)(size_64 * 4);
 	stack_entry->imm_value = return_address_size + shadow_stack_size;
@@ -450,6 +469,7 @@ assemble
 							{
 								newEntry->type = u64_type;
 								newEntry->size = size_64;
+								newEntry->stack_offset = ;
 							}
 							
 						}

@@ -20,13 +20,17 @@ loadProgram
 		u32 size_of_code = (u32)(bytes->end - bytes->memory);
 		u32 get_to_end_of_code = AlignSize(size_of_code, PAGE) - size_of_code;
 		buffer_allocate(bytes, get_to_end_of_code);
+		Import_Data_Table *import = (Import_Data_Table *)bytes->end;
 		
 		for(u64 i = 0; i < header[1].len; i++)
 		{
 			buffer_append_u8(bytes, header[1].bytes[i]);
 		}
+		
+		HMODULE kernel32 = LoadLibraryA("KERNEL32.dll");
+		import->load_lib_address = (u64)GetProcAddress(kernel32, "LoadLibraryA");
+		import->get_proc_address = (u64)GetProcAddress(kernel32, "GetProcAddress");
 	}
-	
 }
 
 int __stdcall
@@ -169,7 +173,8 @@ WinMainCRTStartup
 		
 		U8_Array *header = (U8_Array *)program.memory;
 		u8 *rdata = AlignSize((u32)header[0].len, PAGE) + byte_code.memory;
-		Assert(*(u64 *)rdata == 0x0e);
+		u64 *string_len = (u64 *)(rdata + sizeof(Import_Data_Table));
+		Assert(*string_len == 0x0e);
 		
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
@@ -181,17 +186,18 @@ WinMainCRTStartup
 	}
 	
 	{
-		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\nwinString &-> rcx\r\n0 -> rax\r\nret");
+		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\nwinString &-> rcx\r\nrcx -> rax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
 		loadProgram(&byte_code, program);
 		
 		U8_Array *header = (U8_Array *)program.memory;
 		u8 *rdata = AlignSize((u32)header[0].len, PAGE) + byte_code.memory;
-		Assert(*(u64 *)rdata == 0x0e);
+		u64 *string_len = (u64 *)(rdata + sizeof(Import_Data_Table));
+		Assert(*string_len == 0x0e);
 		
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
-		Assert(result == 0);
+		Assert(result == (u64)((u8 *)string_len + size_64));
 		
 		clear_buffer(&file);
 		clear_buffer(&program);
@@ -199,17 +205,99 @@ WinMainCRTStartup
 	}
 	
 	{
-		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\nrcx <-& winString\r\n0 -> rax\r\nret");
+		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\nrcx <-& winString\r\nrcx -> rax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
 		loadProgram(&byte_code, program);
 		
 		U8_Array *header = (U8_Array *)program.memory;
 		u8 *rdata = AlignSize((u32)header[0].len, PAGE) + byte_code.memory;
-		Assert(*(u64 *)rdata == 0x0e);
+		u64 *string_len = (u64 *)(rdata + sizeof(Import_Data_Table));
+		Assert(*string_len == 0x0e);
 		
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
-		Assert(result == 0);
+		Assert(result == (u64)((u8 *)string_len + size_64));
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "kernel32_name &-> rax\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadProgram(&byte_code, program);
+		
+		U8_Array *header = (U8_Array *)program.memory;
+		Import_Data_Table *import = (Import_Data_Table *)(AlignSize((u32)header[0].len, PAGE) + byte_code.memory);
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == (u64)(import->kernel32_name));
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "LoadLibraryA &-> rax\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadProgram(&byte_code, program);
+		
+		U8_Array *header = (U8_Array *)program.memory;
+		Import_Data_Table *import = (Import_Data_Table *)(AlignSize((u32)header[0].len, PAGE) + byte_code.memory);
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == (u64)(&import->load_lib_address));
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "GetProcAddress &-> rax\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadProgram(&byte_code, program);
+		
+		U8_Array *header = (U8_Array *)program.memory;
+		Import_Data_Table *import = (Import_Data_Table *)(AlignSize((u32)header[0].len, PAGE) + byte_code.memory);
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == (u64)(&import->get_proc_address));
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "rsp - 40\nkernel32_name &-> rcx\ncall LoadLibraryA\nrsp + 40\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadProgram(&byte_code, program);
+		
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == (u64)(LoadLibraryA("KERNEL32.dll")));
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\nrcx <-& winString\r\nrcx -> rax\r\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadProgram(&byte_code, program);
+		
+		U8_Array *header = (U8_Array *)program.memory;
+		u8 *rdata = AlignSize((u32)header[0].len, PAGE) + byte_code.memory;
+		u64 *mem_write = (u64 *)(rdata + sizeof(Import_Data_Table));
+		Assert(*mem_write == 0x0e);
+		
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == (u64)((u8 *)string_len + size_64));
 		
 		clear_buffer(&file);
 		clear_buffer(&program);
