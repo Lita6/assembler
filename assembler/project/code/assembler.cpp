@@ -9,27 +9,10 @@
 *    rcx <- kernel32
 *    output_name &-> rdx
 *    call GetProcAddress
-*    winDebugString <- rax
+*    u64 winDebugString <- rax
 *    string winString "Hello, World!\0"
 *    winString &-> rcx
 *    call winDebugString
-*    rax <- 0
-*    rsp + STACK_ADJUST
-*    ret
-*
-*    rsp - STACK_ADJUST
-*    [rip + kernel32_name] &-> rcx
-*    call [rip + LoadLibraryA]
-*    8bits kernel32
-*    string output_name "OutputDebugStringA\0"
-*    rcx <- [rsp + kernel32]
-*    [rip + output_name] &-> rdx
-*    call [rip + GetProcAddress]
-*    8bits winDebugString
-*    [rsp + winDebugString] <- rax
-*    string winString "Hello, World!\0"
-*    [rip + winString] &-> rcx
-*    call [rsp + winDebugString]
 *    rax <- 0
 *    rsp + STACK_ADJUST
 *    ret
@@ -106,8 +89,23 @@ struct reserved_list
 	list_entry *start;
 	u32 count;
 	Buffer reserved;
+	u8 *temp_entry_start;
 	Buffer strings;
 };
+
+void
+DeallocateOffEnd
+(Buffer *buffer, u8 *start)
+{
+	Assert((start >= buffer->memory) && (start <= buffer->end));
+	
+	for(u8 *i = start; i < buffer->end; i++)
+	{
+		*i = 0;
+	}
+	
+	buffer->end = start;
+}
 
 void
 add_to_list
@@ -251,6 +249,33 @@ struct Import_Data_Table
 };
 #pragma pack(pop)
 
+b32
+IsComplete
+(list_entry *entry, Instruction instr, u32 CurrentOperand)
+{
+	b32 result = FALSE;
+	
+	if(((CurrentOperand == 2) || (entry->type == import_function)) && (instr.operation.type != none))
+	{
+		result = TRUE;
+	}
+	
+	return(result);
+}
+
+b32
+FillOperand
+(Instruction *instr, list_entry *entry, u32 *CurrentOperand)
+{
+	
+	instr->operands[(*CurrentOperand)] = *entry;
+	instr->operands[(*CurrentOperand)].variable_entry = entry;
+	(*CurrentOperand)++;
+	
+	b32 result = IsComplete(entry, *instr, *CurrentOperand);
+	return(result);
+}
+
 void
 assemble
 (Buffer *program, Buffer *Memory, String src, u32 PAGE)
@@ -296,6 +321,8 @@ assemble
 		
 		*IsInitialized = TRUE;
 	}
+	
+	Reserved_Strings.temp_entry_start = Reserved_Strings.reserved.end;
 	
 	// NOTE: Need to reset stack_entry every time for testing
 	stack_entry = &Reserved_Strings.start[(Reserved_Strings.count-1)];
@@ -420,10 +447,8 @@ assemble
 				operand->name = token;
 				operand->type = imm;
 				operand->imm_value = StringToU64(token);
-				if((CurrentOperand == 2) && (instr.operation.type != none))
-				{
-					InstructionComplete = TRUE;
-				}
+				
+				InstructionComplete = IsComplete(operand, instr, CurrentOperand);
 				
 			}
 			else if(processVariableName == TRUE)
@@ -432,6 +457,11 @@ assemble
 				Assert(newEntry != 0);
 				newEntry->name = token;
 				processVariableName = FALSE;
+				
+				if(newEntry->type != string)
+				{
+					InstructionComplete = FillOperand(&instr, newEntry, &CurrentOperand);
+				}
 				
 			}
 			else
@@ -443,15 +473,10 @@ assemble
 					if(token == entry->name)
 					{
 						
-						if((entry->type == reg) || (entry->type == string) || (entry->type == import_function))
+						if((entry->type == reg) || (entry->type == string) || (entry->type == import_function) || (entry->type == imm))
 						{
-							instr.operands[CurrentOperand] = *entry;
-							instr.operands[CurrentOperand].variable_entry = entry;
-							CurrentOperand++;
-							if(((CurrentOperand == 2) || (entry->type == import_function)) && (instr.operation.type != none))
-							{
-								InstructionComplete = TRUE;
-							}
+							
+							InstructionComplete = FillOperand(&instr, entry, &CurrentOperand);
 							
 						}
 						else if((entry->type == string_word) || (entry->type == u64_word))
@@ -469,7 +494,10 @@ assemble
 							{
 								newEntry->type = u64_type;
 								newEntry->size = size_64;
-								newEntry->stack_offset = ;
+								newEntry->stack_offset = (u8)(stack_entry->imm_value - return_address_size);
+								
+								stack_entry->imm_value += size_64;
+								Assert(stack_entry->imm_value < 256);
 							}
 							
 						}
@@ -487,8 +515,6 @@ assemble
 						break;
 					}
 				}
-				
-				
 			}
 			
 			if(InstructionComplete == TRUE)
@@ -496,6 +522,9 @@ assemble
 				u8 op_code = 0;
 				b32 useModrm = FALSE;
 				u8 modrm = 0;
+				b32 useDisplacement = FALSE;
+				u32 Displacement = 0;
+				u8 DisplacementSize = 0;
 				
 				switch (instr.operation.type)
 				{
@@ -523,6 +552,7 @@ assemble
 						}
 						if(instr.operands[1].type == imm)
 						{
+							// TODO: Determine size if there is none
 							instr.operands[1].size = size_8;
 						}
 						
@@ -541,7 +571,6 @@ assemble
 					}; // NOTE: Fall through to lea_left.
 					case lea_left:
 					{
-						// 48 8d 0d 59 00 00 00
 						op_code = 0x8d;
 						
 						u8 reg_op = (u8)(instr.operands[0].reg_address & 0b0111);
@@ -560,10 +589,14 @@ assemble
 						{
 							
 							op_code = (u8)(0xb8 | (instr.operands[0].reg_address & 0b0111));
+							
+							Assert(instr.operands[1].size <= instr.operands[0].size);
 							instr.operands[1].size = instr.operands[0].size;
 						}
 						else
 						{
+							//48 89 44 24 20 - mov [rsp + 0x20], rax
+							
 							op_code = 0x89;
 							
 							u8 reg_op = (u8)(instr.operands[1].reg_address & 0b0111);
@@ -670,4 +703,10 @@ assemble
 	
 	clear_buffer(&buffer_patches);
 	Memory->end = buffer_patches.memory;
+	
+	if(Reserved_Strings.temp_entry_start < Reserved_Strings.reserved.end)
+	{
+		DeallocateOffEnd(&Reserved_Strings.reserved, Reserved_Strings.temp_entry_start);
+		Reserved_Strings.count--;
+	}
 }

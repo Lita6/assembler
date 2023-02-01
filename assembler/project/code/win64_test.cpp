@@ -286,18 +286,30 @@ WinMainCRTStartup
 	}
 	
 	{
-		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\nrcx <-& winString\r\nrcx -> rax\r\nret");
+		String src = create_string(&file, "rsp - STACK_ADJUST\nSTACK_ADJUST -> rax\nrsp + STACK_ADJUST\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
 		loadProgram(&byte_code, program);
 		
-		U8_Array *header = (U8_Array *)program.memory;
-		u8 *rdata = AlignSize((u32)header[0].len, PAGE) + byte_code.memory;
-		u64 *mem_write = (u64 *)(rdata + sizeof(Import_Data_Table));
-		Assert(*mem_write == 0x0e);
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == 0x28);
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "u64 kernel32 <- rax\n0 -> rax\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadProgram(&byte_code, program);
+		
+		u64 stack_adjust = Reserved_Strings.start[(Reserved_Strings.count - 1)].imm_value;
+		Assert(stack_adjust == (u64)(6 * size_64));
 		
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
-		Assert(result == (u64)((u8 *)string_len + size_64));
+		Assert(result == 0);
 		
 		clear_buffer(&file);
 		clear_buffer(&program);
