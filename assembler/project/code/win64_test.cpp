@@ -6,7 +6,7 @@ global u32 PAGE;
 
 void
 loadProgram
-(Buffer *bytes, Buffer program)
+(Buffer *bytes, Buffer program, HMODULE kernel32)
 {
 	U8_Array *header = (U8_Array *)(program.memory);
 	
@@ -27,7 +27,6 @@ loadProgram
 			buffer_append_u8(bytes, header[1].bytes[i]);
 		}
 		
-		HMODULE kernel32 = LoadLibraryA("KERNEL32.dll");
 		import->load_lib_address = (u64)GetProcAddress(kernel32, "LoadLibraryA");
 		import->get_proc_address = (u64)GetProcAddress(kernel32, "GetProcAddress");
 	}
@@ -43,6 +42,8 @@ WinMainCRTStartup
 	Assert(SysInfo.dwPageSize != 0);
 	PAGE = SysInfo.dwPageSize;
 	
+	HMODULE kernel32 = LoadLibraryA("KERNEL32.dll");
+	
 	Buffer AssembleMemory = win64_make_buffer((2*PAGE), PAGE_READWRITE);
 	
 	Buffer byte_code = win64_make_buffer(2*PAGE, PAGE_EXECUTE_READWRITE);
@@ -52,7 +53,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "ret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		fn_void_to_void test = (fn_void_to_void)byte_code.memory;
 		test();
 		Assert(*byte_code.memory == 0xc3);
@@ -65,7 +66,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "155 -> eax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
 		u32 result = test();
 		Assert(result == 155);
@@ -78,7 +79,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "0 -> eax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
 		u32 result = test();
 		Assert(result == 0);
@@ -91,7 +92,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "eax <- 42\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
 		u32 result = test();
 		Assert(result == 42);
@@ -104,7 +105,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "89 -> ecx\r\necx -> eax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
 		u32 result = test();
 		Assert(result == 89);
@@ -117,7 +118,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "155 -> r8d\r\nr8d -> eax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		fn_void_to_u32 test = (fn_void_to_u32)byte_code.memory;
 		u32 result = test();
 		Assert(result == 155);
@@ -130,7 +131,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "155 -> r8\r\nr8 -> rax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
 		Assert(result == 155);
@@ -143,7 +144,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "155 -> r8\r\nr8 + 5\r\nr8 -> rax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
 		Assert(result == 160);
@@ -156,7 +157,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "155 -> r8\r\nr8 - 5\r\nr8 -> rax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
 		Assert(result == 150);
@@ -169,7 +170,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\n0 -> rax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		
 		U8_Array *header = (U8_Array *)program.memory;
 		u8 *rdata = AlignSize((u32)header[0].len, PAGE) + byte_code.memory;
@@ -188,7 +189,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\nwinString &-> rcx\r\nrcx -> rax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		
 		U8_Array *header = (U8_Array *)program.memory;
 		u8 *rdata = AlignSize((u32)header[0].len, PAGE) + byte_code.memory;
@@ -207,7 +208,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "string winString \"Hello, World!\\0\"\r\nrcx <-& winString\r\nrcx -> rax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		
 		U8_Array *header = (U8_Array *)program.memory;
 		u8 *rdata = AlignSize((u32)header[0].len, PAGE) + byte_code.memory;
@@ -226,7 +227,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "kernel32_name &-> rax\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		
 		U8_Array *header = (U8_Array *)program.memory;
 		Import_Data_Table *import = (Import_Data_Table *)(AlignSize((u32)header[0].len, PAGE) + byte_code.memory);
@@ -242,7 +243,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "LoadLibraryA &-> rax\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		
 		U8_Array *header = (U8_Array *)program.memory;
 		Import_Data_Table *import = (Import_Data_Table *)(AlignSize((u32)header[0].len, PAGE) + byte_code.memory);
@@ -258,7 +259,7 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "GetProcAddress &-> rax\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		
 		U8_Array *header = (U8_Array *)program.memory;
 		Import_Data_Table *import = (Import_Data_Table *)(AlignSize((u32)header[0].len, PAGE) + byte_code.memory);
@@ -274,11 +275,11 @@ WinMainCRTStartup
 	{
 		String src = create_string(&file, "rsp - 40\nkernel32_name &-> rcx\ncall LoadLibraryA\nrsp + 40\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
-		Assert(result == (u64)(LoadLibraryA("KERNEL32.dll")));
+		Assert(result == (u64)kernel32);
 		
 		clear_buffer(&file);
 		clear_buffer(&program);
@@ -286,9 +287,9 @@ WinMainCRTStartup
 	}
 	
 	{
-		String src = create_string(&file, "rsp - STACK_ADJUST\nSTACK_ADJUST -> rax\nrsp + STACK_ADJUST\nret");
+		String src = create_string(&file, "STACK_ADJUST -> rax\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
@@ -300,16 +301,30 @@ WinMainCRTStartup
 	}
 	
 	{
-		String src = create_string(&file, "u64 kernel32 <- rax\n0 -> rax\nret");
+		String src = create_string(&file, "rsp - STACK_ADJUST\nkernel32_name &-> rcx\ncall LoadLibraryA\nu64 kernel32 <- rax\nrsp + STACK_ADJUST\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
-		loadProgram(&byte_code, program);
+		loadProgram(&byte_code, program, kernel32);
 		
 		u64 stack_adjust = Reserved_Strings.start[(Reserved_Strings.count - 1)].imm_value;
 		Assert(stack_adjust == (u64)(6 * size_64));
 		
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
-		Assert(result == 0);
+		Assert(result == (u64)kernel32);
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "rsp - STACK_ADJUST\nkernel32_name &-> rcx\nLoadLibraryA &-> rax\ncall rax\nrsp + STACK_ADJUST\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadProgram(&byte_code, program, kernel32);
+		
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == (u64)kernel32);
 		
 		clear_buffer(&file);
 		clear_buffer(&program);

@@ -1,12 +1,17 @@
-rsp - 40
+rsp - STACK_ADJUST
 
 kernel32_name &-> rcx
 call LoadLibraryA
-u64 kernel32
+u64 kernel32 <- rax
+rax -> rcx
+string winOutputString "OutputDebugStringA\0"
+winOutputString &-> rdx
+call GetProcAddress
 
 string winString "Hello, World!\0"
 winString &-> rcx
+call rax
 
-rsp + 40
+rsp + STACK_ADJUST
 0 -> rax
 ret

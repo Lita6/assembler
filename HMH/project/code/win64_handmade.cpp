@@ -7,8 +7,8 @@ WinMainCRTStartup
 (void)
 {
 	
-	HMODULE kernell32 = LoadLibraryA("KERNELL32.dll");
-	fn func = (fn)GetProcAddress(kernell32, "OutputDebugStringA");
+	HMODULE kernel32 = LoadLibraryA("KERNEL32.dll");
+	fn func = (fn)GetProcAddress(kernel32, "OutputDebugStringA");
 	func("This is the first thing we have printed.\n");
 	
 	return(0);

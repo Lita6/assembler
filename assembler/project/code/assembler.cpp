@@ -4,26 +4,18 @@
 *    rsp - STACK_ADJUST
 *    kernel32_name &-> rcx
 *    call LoadLibraryA
-*    u64 kernel32 <- rax // so kernel32 goes on the stack
+*    rax -> rcx
 *    string output_name "OutputDebugStringA\0"
-*    rcx <- kernel32
 *    output_name &-> rdx
 *    call GetProcAddress
-*    u64 winDebugString <- rax
 *    string winString "Hello, World!\0"
 *    winString &-> rcx
-*    call winDebugString
+*    call rax
 *    rax <- 0
 *    rsp + STACK_ADJUST
 *    ret
 *
 *    implement variables
-*    - variable to keep track of stack adjustment amount
-*      - so I'll need to create a reserved string for it
-*      - when a new variable is created, need to add to it and save the rsp offset
-*    - reg to memory move
-*      - rax *<- rcx
-*      - [rax] <- rcx
 *    - memory to reg move
 */
 
@@ -251,11 +243,11 @@ struct Import_Data_Table
 
 b32
 IsComplete
-(list_entry *entry, Instruction instr, u32 CurrentOperand)
+(Instruction instr, u32 CurrentOperand)
 {
 	b32 result = FALSE;
 	
-	if(((CurrentOperand == 2) || (entry->type == import_function)) && (instr.operation.type != none))
+	if(((CurrentOperand == 2) || (instr.operation.type == call)) && (instr.operation.type != none))
 	{
 		result = TRUE;
 	}
@@ -272,7 +264,7 @@ FillOperand
 	instr->operands[(*CurrentOperand)].variable_entry = entry;
 	(*CurrentOperand)++;
 	
-	b32 result = IsComplete(entry, *instr, *CurrentOperand);
+	b32 result = IsComplete(*instr, *CurrentOperand);
 	return(result);
 }
 
@@ -315,8 +307,8 @@ assemble
 		ReserveStrings();
 		
 		add_to_list(&Reserved_Strings, "kernel32_name", string, size_32, 0, 0, (s32)kernel32_name_offset, 0);
-		add_to_list(&Reserved_Strings, "LoadLibraryA", import_function, size_32, 0, 0, (s32)loadlibrary_offset, 0);
-		add_to_list(&Reserved_Strings, "GetProcAddress", import_function, size_32, 0, 0, (s32)((u8 *)(&import_table->get_proc_address) - resource.memory), 0);
+		add_to_list(&Reserved_Strings, "LoadLibraryA", import_function, size_32, 0, 0b101, (s32)loadlibrary_offset, 0);
+		add_to_list(&Reserved_Strings, "GetProcAddress", import_function, size_32, 0, 0b101, (s32)((u8 *)(&import_table->get_proc_address) - resource.memory), 0);
 		add_to_list(&Reserved_Strings, "STACK_ADJUST", imm, size_8, 0, 0, 0, 0);
 		
 		*IsInitialized = TRUE;
@@ -347,6 +339,8 @@ assemble
 	
 	b32 processVariableName = FALSE;
 	list_entry *newEntry = 0;
+	
+	b32 create_stack_patch = FALSE;
 	for(u64 i = 0; i <= EndOfFile; i++)
 	{
 		if(processString == FALSE)
@@ -448,7 +442,7 @@ assemble
 				operand->type = imm;
 				operand->imm_value = StringToU64(token);
 				
-				InstructionComplete = IsComplete(operand, instr, CurrentOperand);
+				InstructionComplete = IsComplete(instr, CurrentOperand);
 				
 			}
 			else if(processVariableName == TRUE)
@@ -475,6 +469,10 @@ assemble
 						
 						if((entry->type == reg) || (entry->type == string) || (entry->type == import_function) || (entry->type == imm))
 						{
+							if(entry == stack_entry)
+							{
+								create_stack_patch = TRUE;
+							}
 							
 							InstructionComplete = FillOperand(&instr, entry, &CurrentOperand);
 							
@@ -494,12 +492,11 @@ assemble
 							{
 								newEntry->type = u64_type;
 								newEntry->size = size_64;
-								newEntry->stack_offset = (u8)(stack_entry->imm_value - return_address_size);
+								newEntry->stack_offset = (u8)(stack_entry->imm_value);
 								
 								stack_entry->imm_value += size_64;
 								Assert(stack_entry->imm_value < 256);
 							}
-							
 						}
 						else
 						{
@@ -522,6 +519,8 @@ assemble
 				u8 op_code = 0;
 				b32 useModrm = FALSE;
 				u8 modrm = 0;
+				b32 useSIB = FALSE;
+				u8 SIB = 0;
 				b32 useDisplacement = FALSE;
 				u32 Displacement = 0;
 				u8 DisplacementSize = 0;
@@ -537,8 +536,14 @@ assemble
 					{
 						op_code = 0xff;
 						
+						u8 mode = 0;
+						if(instr.operands[0].type == reg)
+						{
+							mode = 0b11;
+						}
+						
 						useModrm = TRUE;
-						modrm = (u8)(0x00 | (instr.operation.opcode_extension << 3) | 0b101);
+						modrm = (u8)((mode << 6) | (instr.operation.opcode_extension << 3) | (instr.operands[0].reg_address & 0b111));
 						
 					}break;
 					
@@ -595,13 +600,31 @@ assemble
 						}
 						else
 						{
-							//48 89 44 24 20 - mov [rsp + 0x20], rax
-							
 							op_code = 0x89;
 							
-							u8 reg_op = (u8)(instr.operands[1].reg_address & 0b0111);
-							u8 reg_mem = (u8)(instr.operands[0].reg_address & 0b0111);
-							modrm = (u8)(0xc0 | (reg_op << 3) | reg_mem);
+							u8 reg_op = 0;
+							u8 reg_mem = 0;
+							u8 mode = 0;
+							if((instr.operands[0].type == reg) && (instr.operands[1].type == reg))
+							{							
+								reg_op = (u8)(instr.operands[1].reg_address & 0b0111);
+								reg_mem = (u8)(instr.operands[0].reg_address & 0b0111);
+								mode = 0b11;
+								
+							}
+							else if(instr.operands[0].type == u64_type)
+							{
+								reg_op = (u8)(instr.operands[1].reg_address & 0b0111);
+								reg_mem = 0b100;
+								mode = 0b01;
+								useSIB = TRUE;
+								SIB = 0x24;
+								useDisplacement = TRUE;
+								Displacement = instr.operands[0].stack_offset;
+								DisplacementSize = size_8;
+							}
+							
+							modrm = (u8)((mode << 6) | (reg_op << 3) | reg_mem);
 							useModrm = TRUE;
 						}
 						
@@ -635,6 +658,23 @@ assemble
 					buffer_append_u8(&byte_code, modrm);
 				}
 				
+				if(useSIB == TRUE)
+				{
+					buffer_append_u8(&byte_code, SIB);
+				}
+				
+				if(useDisplacement == TRUE)
+				{
+					if(DisplacementSize == size_8)
+					{
+						buffer_append_u8(&byte_code, (u8)Displacement);
+					}
+					else if(DisplacementSize == size_32)
+					{
+						buffer_append_u32(&byte_code, (u32)Displacement);
+					}
+				}
+				
 				if(instr.operands[0].type == import_function)
 				{
 					instr.operands[1] = instr.operands[0];
@@ -642,12 +682,14 @@ assemble
 				
 				if((instr.operands[1].type == imm) || (instr.operands[1].type == string) || (instr.operands[1].type == import_function))
 				{
-					if((instr.operands[1].type == string) || (instr.operands[1].type == import_function))
+					if((instr.operands[1].type == string) || (instr.operands[1].type == import_function) || (create_stack_patch == TRUE))
 					{
 						Patch *new_patch = (Patch *)(buffer_allocate(&buffer_patches, sizeof(Patch)));
 						new_patch->location = byte_code.end;
 						new_patch->variable_entry = instr.operands[1].variable_entry;
 						patches.count++;
+						
+						create_stack_patch = FALSE;
 					}
 					
 					if(instr.operands[1].size == size_8)
@@ -689,10 +731,16 @@ assemble
 		Patch *current_patch = &patches.start[i];
 		list_entry *var = current_patch->variable_entry;
 		
-		// NOTE: I cheated for now cause I know the rip-relative patches are all 32 bit and are the only patches I have right now
-		s32 rip_relative = (code_section_size - (s32)((current_patch->location + var->size) - byte_code.memory)) + var->resource_offset;
-		
-		*((s32 *)current_patch->location) = rip_relative;
+		if(var == stack_entry)
+		{
+			*current_patch->location = (u8)stack_entry->imm_value;
+		}
+		else
+		{
+			s32 rip_relative = (code_section_size - (s32)((current_patch->location + var->size) - byte_code.memory)) + var->resource_offset;
+			
+			*((s32 *)current_patch->location) = rip_relative;
+		}
 		
 	}
 	
