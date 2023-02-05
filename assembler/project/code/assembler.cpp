@@ -1,22 +1,12 @@
 /* TODO: There's a few things to do to get my program somewhere that can call
 *        a windows function
 *
-*    rsp - STACK_ADJUST
-*    kernel32_name &-> rcx
-*    call LoadLibraryA
-*    rax -> rcx
-*    string output_name "OutputDebugStringA\0"
-*    output_name &-> rdx
-*    call GetProcAddress
-*    string winString "Hello, World!\0"
-*    winString &-> rcx
-*    call rax
-*    rax <- 0
-*    rsp + STACK_ADJUST
-*    ret
-*
-*    implement variables
-*    - memory to reg move
+*    - implement variables
+*      - memory to reg move
+*    - implement addressing modes 
+*      - e.g. There's a huge difference between "call rax" and "call qword ptr[rax]"
+*    - implement functions
+*      - This would give me a way to test out the "call rax" feature
 */
 
 #include "win64_assembler.h"
@@ -410,6 +400,10 @@ assemble
 					else if(src.chars[i] == '\\')
 					{
 						buffer_append_u8(&resource, '\\');
+					}
+					else if(src.chars[i] == 'n')
+					{
+						buffer_append_u8(&resource, '\n');
 					}
 					else if(src.chars[i] == '"')
 					{

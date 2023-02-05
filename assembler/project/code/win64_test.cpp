@@ -318,13 +318,19 @@ WinMainCRTStartup
 	}
 	
 	{
-		String src = create_string(&file, "rsp - STACK_ADJUST\nkernel32_name &-> rcx\nLoadLibraryA &-> rax\ncall rax\nrsp + STACK_ADJUST\nret");
+		String src = create_string(&file, "string winString \"Hello, World!\\n\\0\"\r\nrcx <-& winString\r\nrcx -> rax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
 		loadProgram(&byte_code, program, kernel32);
 		
+		U8_Array *header = (U8_Array *)program.memory;
+		u8 *rdata = AlignSize((u32)header[0].len, PAGE) + byte_code.memory;
+		u64 *string_len = (u64 *)(rdata + sizeof(Import_Data_Table));
+		Assert(*string_len == 0x0f);
+		
 		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
 		u64 result = test();
-		Assert(result == (u64)kernel32);
+		Assert(result == (u64)((u8 *)string_len + size_64));
+		Assert((s32)(*((u8 *)result + *string_len - 2)) == '\n');
 		
 		clear_buffer(&file);
 		clear_buffer(&program);

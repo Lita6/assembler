@@ -249,12 +249,18 @@ WinMainCRTStartup
 	Buffer Buffer_IDT  = win64_make_buffer(PAGE, PAGE_READWRITE);
 	Buffer Buffer_ILT  = win64_make_buffer(PAGE, PAGE_READWRITE);
 	
-#if 1
+#define ANALYZE_KERNEL32 0
+#if ANALYZE_KERNEL32
+	HMODULE kernel32 = LoadLibraryA("KERNEL32.dll");
+	read_file_result Executable = {};
+	Executable.Contents = (u8 *)kernel32;
+#elif 1
 	read_file_result Executable = Win64ReadEntireFile("D:\\Programming\\GitHub\\assembler\\HMH\\build\\win64_handmade.exe");
 #else
 	read_file_result Executable = Win64ReadEntireFile("D:\\Programming\\GitHub\\assembler\\game\\build\\game.exe");
 #endif
 	
+#if (!ANALYZE_KERNEL32)
 	DWORD OldProtect = 0;
 	s32 ChangedProtection = VirtualProtect(Executable.Contents, Executable.ContentsSize, PAGE_READONLY, &OldProtect);
 	if(ChangedProtection == 0)
@@ -263,6 +269,7 @@ WinMainCRTStartup
 		Assert(!"Failed to change executable protection.");
 		(void)ErrorCode;
 	}
+#endif
 	
 	win64_file_header header = {};
 	header.DOSHeader = (dos_header *)Executable.Contents;
