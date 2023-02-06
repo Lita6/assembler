@@ -1,9 +1,15 @@
 rsp - STACK_ADJUST
 
-kernel32_name &-> rcx
-LoadLibraryA &-> rax
-call rax
+0 -> rax
+label function &-> rcx
+call rcx
+
+function &-> rdx
+call rdx
 
 rsp + STACK_ADJUST
-0 -> rax
 ret
+
+function :
+  42 + rax
+  ret

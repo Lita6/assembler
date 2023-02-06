@@ -1,12 +1,9 @@
-/* TODO: There's a few things to do to get my program somewhere that can call
-*        a windows function
+/* TODO: 
 *
 *    - implement variables
 *      - memory to reg move
 *    - implement addressing modes 
 *      - e.g. There's a huge difference between "call rax" and "call qword ptr[rax]"
-*    - implement functions
-*      - This would give me a way to test out the "call rax" feature
 */
 
 #include "win64_assembler.h"
@@ -34,11 +31,13 @@ enum list_entry_type
 	call,
 	string_word,
 	u64_word,
+	label_word,
 	reg,
 	imm,
 	string,
 	import_function,
 	u64_type,
+	label,
 };
 
 struct list_entry
@@ -52,6 +51,7 @@ struct list_entry
 	u64 imm_value;
 	s32 resource_offset;
 	u8 stack_offset;
+	s32 bytecode_offset;
 };
 
 struct Patch
@@ -165,6 +165,7 @@ ReserveStrings
 	/* VARIABLE TYPES */
 	add_to_list(&Reserved_Strings, "string", string_word, 0, 0, 0, 0, 0);
 	add_to_list(&Reserved_Strings, "u64", u64_word, 0, 0, 0, 0, 0);
+	add_to_list(&Reserved_Strings, "label", label_word, 0, 0, 0, 0, 0);
 }
 
 struct Instruction
@@ -264,7 +265,7 @@ assemble
 {
 	
 	U8_Array *header = (U8_Array *)(buffer_allocate(program, (2 * sizeof(U8_Array))));
-	Buffer byte_code = create_buffer(program, 64);
+	Buffer byte_code = create_buffer(program, 200);
 	Buffer resource = create_buffer(program, 200);
 	Import_Data_Table *import_table = (Import_Data_Table *)(buffer_allocate(&resource, sizeof(Import_Data_Table)));
 	
@@ -366,6 +367,13 @@ assemble
 				}
 				
 			}
+			else if(src.chars[i] == ':')
+			{
+				list_entry *entry = instr.operands[0].variable_entry;
+				entry->bytecode_offset = (s32)(byte_code.end - byte_code.memory);
+				instr = {};
+				CurrentOperand = 0;
+			}
 			else
 			{
 				
@@ -461,7 +469,7 @@ assemble
 					if(token == entry->name)
 					{
 						
-						if((entry->type == reg) || (entry->type == string) || (entry->type == import_function) || (entry->type == imm))
+						if((entry->type == reg) || (entry->type == string) || (entry->type == import_function) || (entry->type == imm) || (entry->type == label))
 						{
 							if(entry == stack_entry)
 							{
@@ -471,15 +479,15 @@ assemble
 							InstructionComplete = FillOperand(&instr, entry, &CurrentOperand);
 							
 						}
-						else if((entry->type == string_word) || (entry->type == u64_word))
+						else if((entry->type == string_word) || (entry->type == u64_word) || (entry->type == label_word))
 						{
 							processVariableName = TRUE;
 							newEntry = (list_entry *)buffer_allocate(&Reserved_Strings.reserved, sizeof(list_entry));
 							Reserved_Strings.count++;
 							
-							if(entry->type == string_word)
+							if((entry->type == string_word) || (entry->type == label_word))
 							{
-								newEntry->type = string;
+								newEntry->type = (entry->type == string_word) ? string : label;
 								newEntry->size = size_32;
 							}
 							else if(entry->type == u64_word)
@@ -674,9 +682,13 @@ assemble
 					instr.operands[1] = instr.operands[0];
 				}
 				
-				if((instr.operands[1].type == imm) || (instr.operands[1].type == string) || (instr.operands[1].type == import_function))
+				if((instr.operands[1].type == imm) || 
+					 (instr.operands[1].type == string) || (instr.operands[1].type == import_function) || 
+					 (instr.operands[1].type == label))
 				{
-					if((instr.operands[1].type == string) || (instr.operands[1].type == import_function) || (create_stack_patch == TRUE))
+					if((instr.operands[1].type == string) || (instr.operands[1].type == import_function) || 
+						 (create_stack_patch == TRUE) || 
+						 (instr.operands[1].type == label))
 					{
 						Patch *new_patch = (Patch *)(buffer_allocate(&buffer_patches, sizeof(Patch)));
 						new_patch->location = byte_code.end;
@@ -728,6 +740,12 @@ assemble
 		if(var == stack_entry)
 		{
 			*current_patch->location = (u8)stack_entry->imm_value;
+		}
+		else if(var->type == label)
+		{
+			s32 rip_relative = var->bytecode_offset - (s32)((current_patch->location + var->size) - byte_code.memory);
+			
+			*((s32 *)current_patch->location) = rip_relative;
 		}
 		else
 		{

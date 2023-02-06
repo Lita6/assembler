@@ -337,5 +337,33 @@ WinMainCRTStartup
 		clear_buffer(&byte_code);
 	}
 	
+	{
+		String src = create_string(&file, "rsp - STACK_ADJUST\n0 -> rax\nlabel function &-> rcx\ncall rcx\nrsp + STACK_ADJUST\nret\nfunction :\n155 -> rax\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadProgram(&byte_code, program, kernel32);
+		
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == 155);
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
+	{
+		String src = create_string(&file, "rsp - STACK_ADJUST\n0 -> rax\nlabel function &-> rcx\ncall rcx\nfunction &-> rdx\ncall rdx\nrsp + STACK_ADJUST\nret\nfunction :\n42 + rax\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadProgram(&byte_code, program, kernel32);
+		
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == 84);
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
 	return(0);
 }
