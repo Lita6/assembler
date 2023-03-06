@@ -1,15 +1,28 @@
 rsp - STACK_ADJUST
 
-0 -> rax
-label function &-> rcx
-call rcx
+kernel32_name &-> rcx
+call LoadLibraryA
 
-function &-> rdx
-call rdx
+rcx <- rax
+label function &-> rax
+call rax
+
+0 -> rax
 
 rsp + STACK_ADJUST
 ret
 
 function :
-  42 + rax
-  ret
+
+  rsp - 40
+
+  string OutputDebug "OutputDebugStringA\0"
+  OutputDebug &-> rdx
+  call GetProcAddress
+  string winString "This is the first thing we have printed.\n\0"
+  winString &-> rcx
+  call rax
+
+  rsp + 40
+
+ret

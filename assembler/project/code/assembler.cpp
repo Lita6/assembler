@@ -266,7 +266,7 @@ assemble
 	
 	U8_Array *header = (U8_Array *)(buffer_allocate(program, (2 * sizeof(U8_Array))));
 	Buffer byte_code = create_buffer(program, 200);
-	Buffer resource = create_buffer(program, 200);
+	Buffer resource = create_buffer(program, 400);
 	Import_Data_Table *import_table = (Import_Data_Table *)(buffer_allocate(&resource, sizeof(Import_Data_Table)));
 	
 	u32 loadlibrary_offset = (u32)((u8 *)(&import_table->load_lib_address) - resource.memory);
@@ -294,7 +294,7 @@ assemble
 		buffer_allocate(Memory, size_8);
 		
 		Reserved_Strings.strings = create_buffer(Memory, 1024);
-		Reserved_Strings.reserved = create_buffer(Memory, 1024*3);
+		Reserved_Strings.reserved = create_buffer(Memory, 1024*4);
 		ReserveStrings();
 		
 		add_to_list(&Reserved_Strings, "kernel32_name", string, size_32, 0, 0, (s32)kernel32_name_offset, 0);
@@ -469,7 +469,7 @@ assemble
 					if(token == entry->name)
 					{
 						
-						if((entry->type == reg) || (entry->type == string) || (entry->type == import_function) || (entry->type == imm) || (entry->type == label))
+						if((entry->type == reg) || (entry->type == string) || (entry->type == import_function) || (entry->type == imm) || (entry->type == label) || (entry->type == u64_type))
 						{
 							if(entry == stack_entry)
 							{
@@ -614,15 +614,24 @@ assemble
 								mode = 0b11;
 								
 							}
-							else if(instr.operands[0].type == u64_type)
+							else if((instr.operands[0].type == u64_type) || (instr.operands[1].type == u64_type))
 							{
-								reg_op = (u8)(instr.operands[1].reg_address & 0b0111);
+								u32 var = 0;
+								u32 reg = 1;
+								if(instr.operands[1].type == u64_type)
+								{
+									op_code = 0x8b;
+									reg = 0;
+									var = 1;
+								}
+								
+								reg_op = (u8)(instr.operands[reg].reg_address & 0b0111);
 								reg_mem = 0b100;
 								mode = 0b01;
 								useSIB = TRUE;
 								SIB = 0x24;
 								useDisplacement = TRUE;
-								Displacement = instr.operands[0].stack_offset;
+								Displacement = instr.operands[var].stack_offset;
 								DisplacementSize = size_8;
 							}
 							

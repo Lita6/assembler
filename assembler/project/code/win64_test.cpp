@@ -318,6 +318,20 @@ WinMainCRTStartup
 	}
 	
 	{
+		String src = create_string(&file, "rsp - STACK_ADJUST\n150 -> rcx\nu64 variable <- rcx\nvariable -> rax\nrsp + STACK_ADJUST\nret");
+		assemble(&program, &AssembleMemory, src, PAGE);
+		loadProgram(&byte_code, program, kernel32);
+		
+		fn_void_to_u64 test = (fn_void_to_u64)byte_code.memory;
+		u64 result = test();
+		Assert(result == 150);
+		
+		clear_buffer(&file);
+		clear_buffer(&program);
+		clear_buffer(&byte_code);
+	}
+	
+	{
 		String src = create_string(&file, "string winString \"Hello, World!\\n\\0\"\r\nrcx <-& winString\r\nrcx -> rax\r\nret");
 		assemble(&program, &AssembleMemory, src, PAGE);
 		loadProgram(&byte_code, program, kernel32);
